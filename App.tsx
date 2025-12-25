@@ -45,7 +45,6 @@ const App: React.FC = () => {
     gameStateRef.current = gameState;
   }, [playerProfile, gameState]);
 
-  // Inicialização de Dados com persistência local e remota
   useEffect(() => {
     const init = async () => {
       let savedId = localStorage.getItem('uno_player_id');
@@ -62,23 +61,17 @@ const App: React.FC = () => {
     init();
   }, []);
 
-  // Sync automático do perfil
   useEffect(() => {
     if (localPlayerId && playerProfile.name) {
       syncProfile(localPlayerId, playerProfile);
-      localStorage.setItem('uno_name', playerProfile.name);
-      localStorage.setItem('uno_avatar', playerProfile.avatar);
-      localStorage.setItem('uno_mmr', playerProfile.mmr.toString());
-      localStorage.setItem('uno_coins', playerProfile.coins.toString());
-      localStorage.setItem('uno_skin', playerProfile.equippedSkin);
     }
   }, [playerProfile.name, playerProfile.avatar, playerProfile.mmr, localPlayerId]);
 
-  // LÓGICA DE PRESENÇA E LOBBY (Fixa para evitar sumiço de players)
+  // PRESENÇA UNIVERSAL
   useEffect(() => {
     if (!localPlayerId || !playerProfile.name) return;
 
-    const lobbyChannel = supabase.channel('uno_presence_arena', {
+    const lobbyChannel = supabase.channel('uno_global_presence', {
       config: { presence: { key: localPlayerId } }
     });
 
@@ -93,7 +86,6 @@ const App: React.FC = () => {
       })
       .on('broadcast', { event: 'player_joined_request' }, ({ payload }) => {
         const currentRoom = gameStateRef.current;
-        // CORREÇÃO DO ERRO TS18047: Verificação de nulos completa e encadeada
         if (currentRoom && currentRoom.id === payload.roomId && currentRoom.players?.[0]?.id === localPlayerId) {
           setGameState(prev => {
             if (!prev || prev.players.find(p => p.id === payload.id)) return prev;
@@ -124,21 +116,7 @@ const App: React.FC = () => {
     return () => { lobbyChannel.unsubscribe(); };
   }, [localPlayerId, !!playerProfile.name]);
 
-  // Atualiza presença silenciosamente quando entra/sai de salas
-  useEffect(() => {
-    if (lobbyChannelRef.current && localPlayerId && playerProfile.name) {
-      lobbyChannelRef.current.track({
-        id: localPlayerId,
-        name: playerProfile.name,
-        avatar: playerProfile.avatar,
-        rank: getRankFromMMR(playerProfile.mmr),
-        currentRoomId: gameState?.id || null,
-        lastSeen: Date.now()
-      });
-    }
-  }, [gameState?.id, playerProfile.name, playerProfile.avatar]);
-
-  // Heartbeat e Canais de Sala
+  // CANAL DA SALA E HEARTBEAT
   useEffect(() => {
     if (!gameState?.id || !localPlayerId) return;
     if (roomChannelRef.current) roomChannelRef.current.unsubscribe();
@@ -155,42 +133,39 @@ const App: React.FC = () => {
 
     roomChannelRef.current = channel;
 
-    // Sincronização forçada a cada 5 segundos pelo Host
     const syncInterval = setInterval(() => {
       const current = gameStateRef.current;
-      if (current && current.players?.[0]?.id === localPlayerId && roomChannelRef.current) {
-        roomChannelRef.current.send({
+      if (current && current.status !== GameStatus.FINISHED && current.players?.[0]?.id === localPlayerId) {
+        roomChannelRef.current?.send({
           type: 'broadcast',
           event: 'sync_state',
           payload: { state: current, senderId: localPlayerId }
         });
       }
-    }, 5000);
+    }, 4000);
 
-    return () => { 
-      channel.unsubscribe(); 
-      clearInterval(syncInterval);
-    };
+    return () => { channel.unsubscribe(); clearInterval(syncInterval); };
   }, [gameState?.id, localPlayerId]);
 
-  // IA dos Bots - Rodando apenas no Host
+  // IA DOS BOTS (SÓ O HOST EXECUTA)
   useEffect(() => {
     if (!gameState || gameState.status !== GameStatus.PLAYING) return;
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
     if (currentPlayer?.isBot && gameState.players[0]?.id === localPlayerId) {
-      const timeout = setTimeout(() => {
+      const botAction = setTimeout(() => {
         const latest = gameStateRef.current;
         if (!latest || latest.players[latest.currentPlayerIndex]?.id !== currentPlayer.id) return;
-        const valid = currentPlayer.hand.filter(c => isMoveValid(c, latest));
-        if (valid.length > 0) {
-          const card = valid[Math.floor(Math.random() * valid.length)];
-          const color = card.color === CardColor.WILD ? CardColor.RED : undefined;
-          handlePlayCard(currentPlayer.id, [card.id], color, currentPlayer.hand.length === 2);
+        
+        const validCards = currentPlayer.hand.filter(c => isMoveValid(c, latest));
+        if (validCards.length > 0) {
+          const card = validCards[Math.floor(Math.random() * validCards.length)];
+          const chosenColor = card.color === CardColor.WILD ? [CardColor.RED, CardColor.BLUE, CardColor.GREEN, CardColor.YELLOW][Math.floor(Math.random()*4)] : undefined;
+          handlePlayCard(currentPlayer.id, [card.id], chosenColor, currentPlayer.hand.length === 2);
         } else {
           handleDrawCard(currentPlayer.id);
         }
-      }, 2000);
-      return () => clearTimeout(timeout);
+      }, 1500 + Math.random() * 1000);
+      return () => clearTimeout(botAction);
     }
   }, [gameState?.currentPlayerIndex, gameState?.status, localPlayerId]);
 
@@ -209,11 +184,23 @@ const App: React.FC = () => {
   };
 
   const handlePlayCard = (playerId: string, cardIds: string[], chosenColor?: CardColor, didCallUno?: boolean) => {
-    if (gameStateRef.current?.players?.[0]?.id !== localPlayerId) {
-      roomChannelRef.current?.send({ type: 'broadcast', event: 'game_action', payload: { type: 'PLAY', playerId, cardIds, chosenColor, didCallUno, senderId: localPlayerId } });
+    const isHost = gameStateRef.current?.players?.[0]?.id === localPlayerId;
+    
+    if (!isHost) {
+      roomChannelRef.current?.send({
+        type: 'broadcast',
+        event: 'game_action',
+        payload: { type: 'PLAY', playerId, cardIds, chosenColor, didCallUno, senderId: localPlayerId }
+      });
+      // Aplica localmente para feedback imediato se for o meu turno
+      if (playerId === localPlayerId) applyPlayLocally(playerId, cardIds, chosenColor, didCallUno);
       return;
     }
 
+    applyPlayLocally(playerId, cardIds, chosenColor, didCallUno);
+  };
+
+  const applyPlayLocally = (playerId: string, cardIds: string[], chosenColor?: CardColor, didCallUno?: boolean) => {
     setGameState(prev => {
       if (!prev || prev.status !== GameStatus.PLAYING) return prev;
       const pIdx = prev.players.findIndex(p => p.id === playerId);
@@ -245,6 +232,7 @@ const App: React.FC = () => {
       for (let i = 0; i < jump; i++) nextIdx = getNextPlayerIndex(nextIdx, currentDir, prev.players.length);
       
       const lastC = cards[cards.length - 1];
+      audio.play('card_play');
       return { 
         ...prev, 
         players: prev.players.map((p, i) => i === pIdx ? { ...p, hand: newHand, hasCalledUno: !!didCallUno } : p), 
@@ -259,7 +247,8 @@ const App: React.FC = () => {
   };
 
   const handleDrawCard = (playerId: string) => {
-    if (gameStateRef.current?.players?.[0]?.id !== localPlayerId) {
+    const isHost = gameStateRef.current?.players?.[0]?.id === localPlayerId;
+    if (!isHost) {
       roomChannelRef.current?.send({ type: 'broadcast', event: 'game_action', payload: { type: 'DRAW', playerId, senderId: localPlayerId } });
       return;
     }
@@ -271,6 +260,7 @@ const App: React.FC = () => {
       const player = { ...prev.players[pIdx], hasCalledUno: false };
       const amt = prev.pendingDrawCount > 0 ? prev.pendingDrawCount : 1;
       player.hand = [...player.hand, ...deck.splice(0, amt)];
+      audio.play('card_draw');
       return { ...prev, players: prev.players.map((p, i) => i === pIdx ? player : p), deck, pendingDrawCount: 0, currentPlayerIndex: getNextPlayerIndex(pIdx, prev.direction, prev.players.length), turnStartTime: Date.now() };
     });
   };
@@ -292,7 +282,7 @@ const App: React.FC = () => {
   const handleWin = (winner: Player) => {
     if (winner.id === localPlayerId) {
       audio.play('win_fanfare');
-      setPlayerProfile((p: any) => ({ ...p, mmr: p.mmr + 25, coins: p.coins + 100, stats: { ...p.stats, wins: (p.stats?.wins || 0) + 1, totalGames: (p.stats?.totalGames || 0) + 1 } }));
+      setPlayerProfile((p: any) => ({ ...p, coins: p.coins + 150, mmr: p.mmr + 30, stats: { ...p.stats, wins: (p.stats?.wins || 0) + 1, totalGames: (p.stats?.totalGames || 0) + 1 } }));
     }
   };
 
@@ -314,7 +304,7 @@ const App: React.FC = () => {
     setCurrentView(AppView.GAME);
   };
 
-  if (isLoading) return <div className="h-screen w-screen bg-[#022c22] flex flex-col items-center justify-center gap-6 text-white"><div className="w-16 h-16 border-4 border-yellow-500/20 border-t-yellow-500 rounded-full animate-spin"></div><p className="font-brand text-xl">SINCROZINANDO ARENA...</p></div>;
+  if (isLoading) return <div className="h-screen w-screen bg-[#022c22] flex items-center justify-center text-white font-brand text-2xl">CARREGANDO...</div>;
 
   return (
     <div className="h-screen w-screen bg-[#022c22] overflow-hidden text-white select-none">
