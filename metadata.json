@@ -1,0 +1,8 @@
+{
+  "name": "UNO Online Multiplayer",
+  "description": "A full-featured digital UNO game with private rooms, custom rules, and real-time multiplayer logic.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
