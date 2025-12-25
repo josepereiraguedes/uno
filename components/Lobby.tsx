@@ -22,7 +22,10 @@ const Lobby: React.FC<LobbyProps> = ({ onBack, onCreateRoom, onJoinRoom, onlineP
     botCount: 3
   });
 
+  // Filtra jogadores que estão hospedando salas
   const activeRooms = onlinePlayers.filter(p => p.currentRoomId && p.currentRoomId !== null);
+  // Filtra jogadores que estão apenas no Lobby
+  const lobbyWaiters = onlinePlayers.filter(p => !p.currentRoomId);
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center p-6 animate-fade-in relative z-10 overflow-hidden h-full">
@@ -31,7 +34,7 @@ const Lobby: React.FC<LobbyProps> = ({ onBack, onCreateRoom, onJoinRoom, onlineP
         {/* CONFIGURAÇÃO DA SALA */}
         <div className="bg-white/5 backdrop-blur-3xl p-8 lg:p-10 rounded-[3rem] border border-white/10 shadow-2xl flex flex-col justify-between overflow-y-auto no-scrollbar">
           <div className="space-y-8">
-            <h2 className="text-4xl font-brand text-yellow-400 italic text-center lg:text-left uppercase">CRIAR ARENA</h2>
+            <h2 className="text-4xl font-brand text-yellow-400 italic text-center lg:text-left uppercase tracking-tighter">CRIAR ARENA</h2>
             
             <div className="grid grid-cols-2 gap-4">
               <button 
@@ -39,26 +42,26 @@ const Lobby: React.FC<LobbyProps> = ({ onBack, onCreateRoom, onJoinRoom, onlineP
                 className={`p-6 rounded-3xl border-2 transition-all flex flex-col items-center justify-center gap-1 ${settings.mode === GameMode.NORMAL ? 'bg-blue-600/30 border-blue-500 shadow-[0_0_20px_rgba(37,99,235,0.2)]' : 'bg-black/20 border-transparent opacity-40 hover:opacity-60'}`}
               >
                 <p className="font-brand text-2xl">CASUAL</p>
-                <p className="text-[9px] uppercase tracking-widest font-black text-blue-400/60">Bots & Amigos</p>
+                <p className="text-[9px] uppercase tracking-widest font-black text-blue-400/60">Amigos & Bots</p>
               </button>
               <button 
                 onClick={() => setSettings({...settings, mode: GameMode.RANKED, botCount: 0})}
                 className={`p-6 rounded-3xl border-2 transition-all flex flex-col items-center justify-center gap-1 ${settings.mode === GameMode.RANKED ? 'bg-yellow-600/30 border-yellow-500 shadow-[0_0_20px_rgba(234,179,8,0.2)]' : 'bg-black/20 border-transparent opacity-40 hover:opacity-60'}`}
               >
                 <p className="font-brand text-2xl text-yellow-400">RANKED</p>
-                <p className="text-[9px] uppercase tracking-widest font-black text-yellow-500/60">Elite Online</p>
+                <p className="text-[9px] uppercase tracking-widest font-black text-yellow-500/60">Competitivo</p>
               </button>
             </div>
 
             <div className="space-y-4">
               {settings.mode === GameMode.NORMAL && (
                 <div className="bg-black/40 p-6 rounded-3xl border border-white/5 space-y-4">
-                  <label className="text-[10px] font-black uppercase tracking-widest text-white/40 block text-center lg:text-left">Dificuldade da Arena (IA)</label>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-white/40 block text-center lg:text-left">Quantidade de Bots</label>
                   <div className="flex items-center justify-between px-4">
                      <button onClick={() => setSettings(s => ({...s, botCount: Math.max(1, s.botCount - 1)}))} className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center text-3xl hover:bg-white/10 transition-colors border border-white/5">-</button>
                      <div className="text-center">
                        <span className="text-5xl font-brand text-blue-400 drop-shadow-lg">{settings.botCount}</span>
-                       <p className="text-[8px] font-black text-white/20 uppercase mt-1">Bots</p>
+                       <p className="text-[8px] font-black text-white/20 uppercase mt-1">Bots Oponentes</p>
                      </div>
                      <button onClick={() => setSettings(s => ({...s, botCount: Math.min(9, s.botCount + 1)}))} className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center text-3xl hover:bg-white/10 transition-colors border border-white/5">+</button>
                   </div>
@@ -71,11 +74,11 @@ const Lobby: React.FC<LobbyProps> = ({ onBack, onCreateRoom, onJoinRoom, onlineP
                     <select 
                       value={settings.turnTimeLimit} 
                       onChange={(e) => setSettings({...settings, turnTimeLimit: Number(e.target.value)})} 
-                      className="bg-emerald-950 text-yellow-400 font-brand text-lg outline-none p-2 rounded-xl border border-white/10 cursor-pointer"
+                      className="bg-[#021d18] text-yellow-400 font-brand text-lg outline-none p-2 rounded-xl border border-white/10 cursor-pointer"
                     >
-                      <option value={10}>10s</option>
-                      <option value={15}>15s</option>
-                      <option value={30}>30s</option>
+                      <option value={10}>10 segundos</option>
+                      <option value={15}>15 segundos</option>
+                      <option value={30}>30 segundos</option>
                     </select>
                  </div>
                  <button 
@@ -83,7 +86,7 @@ const Lobby: React.FC<LobbyProps> = ({ onBack, onCreateRoom, onJoinRoom, onlineP
                   className={`p-4 rounded-2xl flex flex-col gap-2 transition-all border ${settings.mirrorRuleEnabled ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-red-500/10 text-red-400 border-red-500/30 opacity-60'}`}
                  >
                     <span className="text-[8px] font-black uppercase tracking-widest">Regra Espelho</span>
-                    <span className="font-brand text-lg">{settings.mirrorRuleEnabled ? 'ON' : 'OFF'}</span>
+                    <span className="font-brand text-lg">{settings.mirrorRuleEnabled ? 'LIGADA' : 'DESLIGADA'}</span>
                  </button>
               </div>
             </div>
@@ -96,24 +99,24 @@ const Lobby: React.FC<LobbyProps> = ({ onBack, onCreateRoom, onJoinRoom, onlineP
             >
               CRIAR SALA
             </button>
-            <button onClick={onBack} className="w-full text-white/20 uppercase font-black text-[10px] tracking-[0.5em] hover:text-white transition-colors py-2">Voltar ao Menu</button>
+            <button onClick={onBack} className="w-full text-white/20 uppercase font-black text-[10px] tracking-[0.5em] hover:text-white transition-colors py-2">Voltar ao Perfil</button>
           </div>
         </div>
 
-        {/* LISTA DE ARENAS ATIVAS */}
+        {/* LISTA DE ARENAS E JOGADORES */}
         <div className="bg-black/40 backdrop-blur-3xl p-8 lg:p-10 rounded-[3rem] border border-white/10 flex flex-col overflow-hidden">
           <div className="flex items-center justify-between mb-8">
-             <h3 className="font-brand text-2xl text-blue-400 italic">ARENAS ONLINE</h3>
+             <h3 className="font-brand text-2xl text-blue-400 italic">ARENAS ATIVAS</h3>
              <span className="px-4 py-1.5 bg-blue-500/20 text-blue-400 rounded-full text-[9px] font-black animate-pulse border border-blue-500/20">{onlinePlayers.length} ONLINE</span>
           </div>
 
-          <div className="flex-1 overflow-y-auto space-y-4 no-scrollbar pr-2">
+          <div className="flex-1 overflow-y-auto space-y-4 no-scrollbar pr-2 pb-10">
             {activeRooms.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center text-center space-y-4 py-20">
-                <span className="text-7xl opacity-20">📡</span>
+              <div className="h-64 flex flex-col items-center justify-center text-center space-y-4 border-2 border-dashed border-white/5 rounded-[2rem]">
+                <span className="text-5xl opacity-20">📡</span>
                 <div className="space-y-1">
-                  <p className="font-bold uppercase tracking-[0.3em] text-[10px] text-white/20">Aguardando Arenas Públicas</p>
-                  <p className="text-[8px] text-white/10 uppercase tracking-widest">Crie uma sala para amigos entrarem</p>
+                  <p className="font-bold uppercase tracking-[0.3em] text-[10px] text-white/20">Nenhuma sala pública aberta</p>
+                  <p className="text-[8px] text-white/10 uppercase tracking-widest">Crie sua própria arena agora!</p>
                 </div>
               </div>
             ) : (
@@ -136,16 +139,22 @@ const Lobby: React.FC<LobbyProps> = ({ onBack, onCreateRoom, onJoinRoom, onlineP
               ))
             )}
             
-            {/* Outros jogadores online mas sem sala */}
-            <div className="mt-10 border-t border-white/5 pt-6">
-               <p className="text-[8px] font-black uppercase text-white/20 tracking-[0.4em] mb-4 text-center">No Lobby</p>
-               <div className="flex flex-wrap justify-center gap-3">
-                  {onlinePlayers.filter(p => !p.currentRoomId).map(p => (
-                    <div key={p.id} className="w-10 h-10 rounded-full bg-black/40 flex items-center justify-center text-xl border border-white/5 relative group cursor-help">
-                       {p.avatar}
-                       <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-white text-emerald-950 text-[8px] font-black px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap uppercase tracking-widest shadow-xl pointer-events-none">
-                         {p.name}
+            {/* Lista de Jogadores no Lobby */}
+            <div className="mt-8">
+               <div className="flex items-center gap-4 mb-4">
+                  <div className="flex-1 h-px bg-white/5"></div>
+                  <p className="text-[8px] font-black uppercase text-white/20 tracking-[0.4em]">Jogadores no Lobby</p>
+                  <div className="flex-1 h-px bg-white/5"></div>
+               </div>
+               <div className="flex flex-wrap justify-center gap-4">
+                  {lobbyWaiters.length === 0 && <p className="text-[8px] text-white/5 uppercase">Solidão total no menu...</p>}
+                  {lobbyWaiters.map(p => (
+                    <div key={p.id} className="flex flex-col items-center gap-1 group">
+                       <div className="w-12 h-12 rounded-full bg-black/40 flex items-center justify-center text-2xl border border-white/10 relative overflow-hidden group-hover:scale-110 transition-transform cursor-help">
+                          {p.avatar}
+                          <div className="absolute inset-0 bg-emerald-500/5 animate-pulse"></div>
                        </div>
+                       <span className="text-[8px] font-bold text-white/30 uppercase tracking-tighter w-14 truncate text-center group-hover:text-white transition-colors">{p.name}</span>
                     </div>
                   ))}
                </div>

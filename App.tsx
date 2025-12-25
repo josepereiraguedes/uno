@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { GameState, GameStatus, Player, Card, CardColor, CardType, GameSettings, GameMode, AppView, OnlinePresence, EphemeralReaction } from './types';
 import { generateDeck, AVATARS } from './constants';
 import { isMoveValid, getNextPlayerIndex, applyCardEffect, getRankFromMMR } from './engine/unoLogic';
@@ -22,6 +22,7 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   
   const gameStateRef = useRef<GameState | null>(null);
+  const profileRef = useRef<any>(null);
   const lobbyChannelRef = useRef<any>(null);
   const roomChannelRef = useRef<any>(null);
 
@@ -39,13 +40,19 @@ const App: React.FC = () => {
     achievements: JSON.parse(localStorage.getItem('uno_achievements') || '[]')
   });
 
-  // IA dos Bots - Executada apenas pelo Host
+  // Mantém o Ref atualizado para callbacks de rede sem causar re-subscrições
+  useEffect(() => {
+    profileRef.current = playerProfile;
+    gameStateRef.current = gameState;
+  }, [playerProfile, gameState]);
+
+  // IA dos Bots - Lógica robusta executada pelo Host
   useEffect(() => {
     if (!gameState || gameState.status !== GameStatus.PLAYING) return;
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
     const isHost = gameState.players[0]?.id === localPlayerId;
     
-    if (currentPlayer && currentPlayer.isBot && isHost) {
+    if (currentPlayer?.isBot && isHost) {
       const botThinkTime = Math.random() * 1000 + 1500;
       const timeout = setTimeout(() => {
         const latestState = gameStateRef.current;
@@ -68,7 +75,7 @@ const App: React.FC = () => {
     }
   }, [gameState?.currentPlayerIndex, gameState?.status, localPlayerId]);
 
-  // Inicialização do Perfil e ID
+  // Inicialização única
   useEffect(() => {
     const init = async () => {
       let savedId = localStorage.getItem('uno_player_id');
@@ -85,7 +92,7 @@ const App: React.FC = () => {
     init();
   }, []);
 
-  // Persistência do Perfil
+  // Sincronização de Perfil com Supabase
   useEffect(() => {
     if (localPlayerId && playerProfile.name) {
       syncProfile(localPlayerId, playerProfile);
@@ -95,33 +102,32 @@ const App: React.FC = () => {
       localStorage.setItem('uno_coins', playerProfile.coins.toString());
       localStorage.setItem('uno_skin', playerProfile.equippedSkin);
     }
-  }, [playerProfile, localPlayerId]);
+  }, [playerProfile.name, playerProfile.avatar, playerProfile.mmr, localPlayerId]);
 
-  // CANAL DE LOBBY E PRESENÇA (Estável)
+  // CANAL DE LOBBY: INSCRITO APENAS UMA VEZ
   useEffect(() => {
     if (!localPlayerId || !playerProfile.name) return;
 
-    const channel = supabase.channel('uno_arena_lobby', {
+    const lobbyChannel = supabase.channel('uno_universal_lobby', {
       config: { presence: { key: localPlayerId } }
     });
 
-    channel
+    lobbyChannel
       .on('presence', { event: 'sync' }, () => {
-        const newState = channel.presenceState();
-        const presences: Record<string, OnlinePresence> = {};
-        Object.keys(newState).forEach((key) => {
-          presences[key] = (newState[key] as any)[0];
+        const presenceState = lobbyChannel.presenceState();
+        const players: Record<string, OnlinePresence> = {};
+        Object.keys(presenceState).forEach((key) => {
+          players[key] = (presenceState[key] as any)[0];
         });
-        setOnlinePlayers(presences);
+        setOnlinePlayers(players);
       })
       .on('broadcast', { event: 'player_joined_request' }, ({ payload }) => {
-        const currentRoom = gameStateRef.current;
-        // Host responde ao pedido de entrada
-        if (currentRoom && currentRoom.id === payload.roomId && currentRoom.players[0]?.id === localPlayerId) {
+        // Host responde ao pedido
+        if (gameStateRef.current?.id === payload.roomId && gameStateRef.current.players[0]?.id === localPlayerId) {
           setGameState(prev => {
             if (!prev || prev.players.find(p => p.id === payload.id)) return prev;
             const newState = { ...prev, players: [...prev.players, payload] };
-            // Força envio do estado completo para o novo jogador
+            // Envia estado atualizado imediatamente via canal da sala
             roomChannelRef.current?.send({
               type: 'broadcast',
               event: 'sync_state',
@@ -133,22 +139,22 @@ const App: React.FC = () => {
       })
       .subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
-          await channel.track({
+          await lobbyChannel.track({
             id: localPlayerId,
-            name: playerProfile.name,
-            avatar: playerProfile.avatar,
-            rank: getRankFromMMR(playerProfile.mmr),
+            name: profileRef.current.name,
+            avatar: profileRef.current.avatar,
+            rank: getRankFromMMR(profileRef.current.mmr),
             currentRoomId: gameStateRef.current?.id || null,
-            lastSeen: Date.now()
+            isOnline: true
           });
         }
       });
 
-    lobbyChannelRef.current = channel;
-    return () => { channel.unsubscribe(); };
-  }, [localPlayerId, playerProfile.name]);
+    lobbyChannelRef.current = lobbyChannel;
+    return () => { lobbyChannel.unsubscribe(); };
+  }, [localPlayerId, !!playerProfile.name]);
 
-  // Atualiza Track de Presença ao mudar de sala
+  // Atualização silenciosa de Presença (quando cria sala ou muda avatar)
   useEffect(() => {
     if (lobbyChannelRef.current && localPlayerId && playerProfile.name) {
       lobbyChannelRef.current.track({
@@ -157,38 +163,35 @@ const App: React.FC = () => {
         avatar: playerProfile.avatar,
         rank: getRankFromMMR(playerProfile.mmr),
         currentRoomId: gameState?.id || null,
-        lastSeen: Date.now()
+        isOnline: true
       });
     }
-  }, [gameState?.id, localPlayerId, playerProfile.name]);
+  }, [gameState?.id, playerProfile.name, playerProfile.avatar]);
 
-  // CANAL DE SALA (Dinâmico)
+  // CANAL DA SALA ESPECÍFICA
   useEffect(() => {
     if (!gameState?.id || !localPlayerId) return;
 
     if (roomChannelRef.current) roomChannelRef.current.unsubscribe();
 
-    const channel = supabase.channel(`uno_room_${gameState.id}`);
-    channel
+    const roomChannel = supabase.channel(`room_${gameState.id}`);
+    roomChannel
       .on('broadcast', { event: 'game_action' }, ({ payload }) => {
-        if (!payload || payload.senderId === localPlayerId) return;
-        processRemoteAction(payload);
+        if (payload?.senderId !== localPlayerId) processRemoteAction(payload);
       })
       .on('broadcast', { event: 'sync_state' }, ({ payload }) => {
-        if (!payload || payload.senderId === localPlayerId) return;
-        setGameState(payload.state);
+        if (payload?.senderId !== localPlayerId) setGameState(payload.state);
       })
       .subscribe();
 
-    roomChannelRef.current = channel;
-    return () => { channel.unsubscribe(); };
+    roomChannelRef.current = roomChannel;
+    return () => { roomChannel.unsubscribe(); };
   }, [gameState?.id, localPlayerId]);
 
-  // Sincronização automática do Host para os outros
+  // Sync automático do Host
   useEffect(() => {
-    gameStateRef.current = gameState;
-    if (gameState && gameState.players.length > 0 && gameState.players[0].id === localPlayerId) {
-      roomChannelRef.current?.send({
+    if (gameState && gameState.players[0]?.id === localPlayerId && roomChannelRef.current) {
+      roomChannelRef.current.send({
         type: 'broadcast',
         event: 'sync_state',
         payload: { state: gameState, senderId: localPlayerId }
@@ -210,7 +213,6 @@ const App: React.FC = () => {
   };
 
   const handlePlayCard = (playerId: string, cardIds: string[], chosenColor?: CardColor, didCallUno?: boolean) => {
-    // Se não for o Host, envia a ação
     if (gameStateRef.current?.players[0]?.id !== localPlayerId) {
       roomChannelRef.current?.send({
         type: 'broadcast',
@@ -319,12 +321,6 @@ const App: React.FC = () => {
         coins: prev.coins + 100,
         stats: { ...prev.stats, wins: prev.stats.wins + 1, totalGames: prev.stats.totalGames + 1 }
       }));
-    } else if (!winner.isBot) {
-       setPlayerProfile((prev: any) => ({
-        ...prev,
-        mmr: Math.max(0, prev.mmr - 15),
-        stats: { ...prev.stats, losses: prev.stats.losses + 1, totalGames: prev.stats.totalGames + 1 }
-      }));
     }
   };
 
@@ -342,7 +338,6 @@ const App: React.FC = () => {
   };
 
   const joinRoom = (roomId: string) => {
-    // Estado temporário para o Guest
     setGameState({ 
       id: roomId, players: [], status: GameStatus.LOBBY, deck: [], discardPile: [], currentPlayerIndex: 0, 
       direction: 1, currentColor: CardColor.RED, winner: null, settings: { mode: GameMode.RANKED } as any, 
@@ -357,7 +352,7 @@ const App: React.FC = () => {
     return (
       <div className="h-screen w-screen bg-[#022c22] flex flex-col items-center justify-center gap-6">
         <div className="w-24 h-24 border-8 border-yellow-500/20 border-t-yellow-500 rounded-full animate-spin"></div>
-        <p className="font-brand text-yellow-400 text-2xl animate-pulse">SINCROZINANDO ARENA...</p>
+        <p className="font-brand text-yellow-400 text-2xl animate-pulse">CARREGANDO ARENA...</p>
       </div>
     );
   }
