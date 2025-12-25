@@ -7,7 +7,7 @@ import { COLOR_CLASSES, VOICE_PHRASES } from '../constants';
 import { audio } from '../services/audioService';
 
 interface GameTableProps {
-  gameState: GameState;
+  gameState: GameState | null;
   localPlayerId: string;
   equippedSkin: string;
   reactions: Record<string, EphemeralReaction>;
@@ -24,10 +24,10 @@ interface GameTableProps {
 
 const GameTable: React.FC<GameTableProps> = ({ gameState, localPlayerId, equippedSkin, reactions, onPlayCard, onDrawCard, onCallUno, onSendReaction, onTimeout, onSendVoice, onStartGame, onLeaveRoom, onlinePlayers }) => {
   // SEGURANÇA: Busca o jogador local no estado sincronizado
-  const localPlayer = gameState.players.find(p => p.id === localPlayerId);
+  const localPlayer = gameState?.players.find(p => p.id === localPlayerId);
   // SEGURANÇA: Busca o jogador atual do turno
-  const currentPlayer = gameState.players[gameState.currentPlayerIndex] || gameState.players[0];
-  const isMyTurn = gameState.status === GameStatus.PLAYING && currentPlayer?.id === localPlayerId;
+  const currentPlayer = gameState?.players[gameState.currentPlayerIndex] || gameState?.players[0];
+  const isMyTurn = gameState?.status === GameStatus.PLAYING && currentPlayer?.id === localPlayerId;
   
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [showPicker, setShowPicker] = useState(false);
@@ -35,7 +35,7 @@ const GameTable: React.FC<GameTableProps> = ({ gameState, localPlayerId, equippe
   const [showVoiceMenu, setShowVoiceMenu] = useState(false);
   const [showAudioSettings, setShowAudioSettings] = useState(false);
   const [unoDeclared, setUnoDeclared] = useState(false);
-  const [timeLeft, setTimeLeft] = useState(gameState.settings?.turnTimeLimit || 15);
+  const [timeLeft, setTimeLeft] = useState(gameState?.settings?.turnTimeLimit || 15);
   const [vol, setVol] = useState(audio.getVolume());
   const [copySuccess, setCopySuccess] = useState(false);
   
@@ -44,7 +44,7 @@ const GameTable: React.FC<GameTableProps> = ({ gameState, localPlayerId, equippe
 
   // Timer de Turno
   useEffect(() => {
-    if (gameState.status !== GameStatus.PLAYING || !currentPlayer) return;
+    if (!gameState || gameState.status !== GameStatus.PLAYING || !currentPlayer) return;
     const interval = setInterval(() => {
       const elapsed = Math.floor((Date.now() - gameState.turnStartTime) / 1000);
       const limit = gameState.settings?.turnTimeLimit || 15;
@@ -61,25 +61,25 @@ const GameTable: React.FC<GameTableProps> = ({ gameState, localPlayerId, equippe
       }
     }, 500);
     return () => clearInterval(interval);
-  }, [gameState.turnStartTime, gameState.currentPlayerIndex, gameState.status]);
+  }, [gameState?.turnStartTime, gameState?.currentPlayerIndex, gameState?.status]);
 
   // Reset de seleção ao mudar de turno
   useEffect(() => {
     setSelectedIds([]);
     setUnoDeclared(false);
-    // Nota: Menus de Emoji e Voz não resetam mais aqui para evitar fechar sozinhos
     if (isMyTurn) audio.play('click');
-  }, [gameState.currentPlayerIndex]);
+  }, [gameState?.currentPlayerIndex]);
 
   // Bloqueio de renderização se os dados básicos não estiverem prontos (Evita a Tela Verde)
-  if (!localPlayer || !gameState.settings || gameState.players.length === 0) {
+  if (!gameState || !localPlayer || !gameState.settings || gameState.players.length === 0) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center bg-[#022c22] gap-6 animate-fade-in">
         <div className="w-20 h-20 border-8 border-yellow-500/20 border-t-yellow-500 rounded-full animate-spin"></div>
         <div className="text-center space-y-2">
-          <p className="font-brand text-yellow-500 text-2xl animate-pulse italic uppercase tracking-widest">Sincronizando Arena</p>
-          <p className="text-white/20 text-[10px] font-black uppercase tracking-[0.3em]">Aguardando dados do servidor...</p>
+          <p className="font-brand text-yellow-400 text-2xl animate-pulse italic uppercase tracking-widest">Sincronizando Arena</p>
+          <p className="text-white/20 text-[10px] font-black uppercase tracking-[0.3em]">Aguardando dados do Host...</p>
         </div>
+        <button onClick={onLeaveRoom} className="mt-8 px-8 py-3 bg-red-600/20 text-red-400 rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-red-600/40 transition-all border border-red-500/20">Cancelar Entrada</button>
       </div>
     );
   }

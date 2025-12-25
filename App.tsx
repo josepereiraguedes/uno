@@ -40,7 +40,7 @@ const App: React.FC = () => {
     achievements: JSON.parse(localStorage.getItem('uno_achievements') || '[]')
   });
 
-  // IA DOS BOTS (Somente Host processa)
+  // IA DOS BOTS
   useEffect(() => {
     if (!gameState || gameState.status !== GameStatus.PLAYING) return;
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
@@ -140,7 +140,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     gameStateRef.current = gameState;
-    if (gameState && gameState.players[0].id === localPlayerId && roomChannel) {
+    if (gameState && gameState.players.length > 0 && gameState.players[0].id === localPlayerId && roomChannel) {
       roomChannel.send({ type: 'broadcast', event: 'sync_state', payload: { state: gameState, senderId: localPlayerId } });
     }
   }, [gameState]);
@@ -273,7 +273,7 @@ const App: React.FC = () => {
   const joinRoom = (roomId: string) => {
     const payload = { ...playerProfile, id: localPlayerId!, hand: [], isHost: false, isBot: false, hasCalledUno: false, roomId, score: 0 };
     lobbyChannel?.send({ type: 'broadcast', event: 'player_joined_request', payload });
-    setGameState({ id: roomId, players: [], status: GameStatus.LOBBY, deck: [], discardPile: [], currentPlayerIndex: 0, direction: 1, currentColor: CardColor.RED, winner: null, settings: {} as any, turnStartTime: Date.now(), pendingDrawCount: 0 });
+    // Não inicializamos gameState aqui para forçar o Guest a esperar pelo sync_state do Host
     setCurrentView(AppView.GAME);
   };
 
@@ -294,9 +294,9 @@ const App: React.FC = () => {
       {currentView === AppView.RANKING && <Ranking onBack={() => setCurrentView(AppView.PROFILE)} currentMMR={playerProfile.mmr} />}
       {currentView === AppView.STORE && <Store profile={playerProfile} onUpdate={(u) => setPlayerProfile({...playerProfile, ...u})} onClose={() => setCurrentView(AppView.PROFILE)} />}
       
-      {currentView === AppView.GAME && gameState && (
+      {currentView === AppView.GAME && (
         <GameTable 
-            gameState={gameState} 
+            gameState={gameState!} 
             localPlayerId={localPlayerId!} 
             reactions={reactions}
             equippedSkin={playerProfile.equippedSkin}
