@@ -44,12 +44,12 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!gameState || gameState.status !== GameStatus.PLAYING) return;
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
-    const isHost = gameState.players[0].id === localPlayerId;
+    const isHost = gameState.players[0]?.id === localPlayerId;
     if (currentPlayer && currentPlayer.isBot && isHost) {
       const botThinkTime = Math.random() * 1500 + 1500;
       const timeout = setTimeout(() => {
         const latestState = gameStateRef.current;
-        if (!latestState || latestState.players[latestState.currentPlayerIndex].id !== currentPlayer.id) return;
+        if (!latestState || latestState.players[latestState.currentPlayerIndex]?.id !== currentPlayer.id) return;
         const validCards = currentPlayer.hand.filter(c => isMoveValid(c, latestState));
         if (validCards.length > 0) {
           const cardToPlay = validCards[Math.floor(Math.random() * validCards.length)];
@@ -106,11 +106,15 @@ const App: React.FC = () => {
       setOnlinePlayers(presences);
     }).on('broadcast', { event: 'player_joined_request' }, ({ payload }) => {
       const currentRoom = gameStateRef.current;
+      // Somente o Host processa o pedido de entrada
       if (currentRoom && currentRoom.id === payload.roomId && currentRoom.players[0].id === localPlayerId) {
          setGameState(prev => {
            if (!prev || prev.players.find(p => p.id === payload.id)) return prev;
            const newPlayers = [...prev.players, payload];
-           return { ...prev, players: newPlayers };
+           const newState = { ...prev, players: newPlayers };
+           // Força sincronização imediata para o novo jogador
+           roomChannel?.send({ type: 'broadcast', event: 'sync_state', payload: { state: newState, senderId: localPlayerId } });
+           return newState;
          });
       }
     }).subscribe(async (status) => {
@@ -126,20 +130,24 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!gameState?.id || !localPlayerId) return;
     if (roomChannel) roomChannel.unsubscribe();
+    
     const channel = supabase.channel(`uno_room_${gameState.id}`);
     channel.on('broadcast', { event: 'game_action' }, ({ payload }) => {
       if (payload.senderId === localPlayerId) return;
       processRemoteAction(payload);
     }).on('broadcast', { event: 'sync_state' }, ({ payload }) => {
       if (payload.senderId === localPlayerId) return;
+      // Guest recebe o estado completo do Host aqui
       setGameState(payload.state);
     }).subscribe();
+    
     roomChannel = channel;
     return () => { channel.unsubscribe(); };
   }, [gameState?.id, localPlayerId]);
 
   useEffect(() => {
     gameStateRef.current = gameState;
+    // Somente o Host faz o broadcast automático do estado ao mudar
     if (gameState && gameState.players.length > 0 && gameState.players[0].id === localPlayerId && roomChannel) {
       roomChannel.send({ type: 'broadcast', event: 'sync_state', payload: { state: gameState, senderId: localPlayerId } });
     }
@@ -271,9 +279,25 @@ const App: React.FC = () => {
   };
 
   const joinRoom = (roomId: string) => {
+    // IMPORTANTE: Criamos um estado parcial para forçar o useEffect a se inscrever no canal da sala
+    // sem isso, o roomChannel ficaria null e o broadcast do host nunca chegaria.
+    setGameState({ 
+        id: roomId, 
+        players: [], 
+        status: GameStatus.LOBBY, 
+        deck: [], 
+        discardPile: [], 
+        currentPlayerIndex: 0, 
+        direction: 1, 
+        currentColor: CardColor.RED, 
+        winner: null, 
+        settings: { mode: GameMode.RANKED } as any, 
+        turnStartTime: Date.now(), 
+        pendingDrawCount: 0 
+    });
+    
     const payload = { ...playerProfile, id: localPlayerId!, hand: [], isHost: false, isBot: false, hasCalledUno: false, roomId, score: 0 };
     lobbyChannel?.send({ type: 'broadcast', event: 'player_joined_request', payload });
-    // Não inicializamos gameState aqui para forçar o Guest a esperar pelo sync_state do Host
     setCurrentView(AppView.GAME);
   };
 
@@ -296,7 +320,7 @@ const App: React.FC = () => {
       
       {currentView === AppView.GAME && (
         <GameTable 
-            gameState={gameState!} 
+            gameState={gameState} 
             localPlayerId={localPlayerId!} 
             reactions={reactions}
             equippedSkin={playerProfile.equippedSkin}

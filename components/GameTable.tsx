@@ -71,6 +71,7 @@ const GameTable: React.FC<GameTableProps> = ({ gameState, localPlayerId, equippe
   }, [gameState?.currentPlayerIndex]);
 
   // Bloqueio de renderização se os dados básicos não estiverem prontos (Evita a Tela Verde)
+  // Agora validamos se o localPlayer existe no array, o que confirma que o Host processou a entrada.
   if (!gameState || !localPlayer || !gameState.settings || gameState.players.length === 0) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center bg-[#022c22] gap-6 animate-fade-in">
