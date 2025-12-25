@@ -13,7 +13,6 @@ import GameTable from './components/GameTable';
 import GameOver from './components/GameOver';
 import Store from './components/Store';
 
-// Realtime Channel para Multiplayer Global
 let roomChannel: any = null;
 
 const App: React.FC = () => {
@@ -40,30 +39,33 @@ const App: React.FC = () => {
     achievements: JSON.parse(localStorage.getItem('uno_achievements') || '[]')
   });
 
-  // IA DO BOT
+  // IA DOS BOTS: O Host é o mestre da IA para sincronização
   useEffect(() => {
     if (!gameState || gameState.status !== GameStatus.PLAYING) return;
     
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
     if (currentPlayer && currentPlayer.isBot && localPlayerId === gameState.players[0].id) {
-      // Apenas o HOST (primeiro jogador) processa a lógica dos bots para evitar duplicidade
       const botThinkTime = Math.random() * 1500 + 1000;
       const timeout = setTimeout(() => {
-        const validCards = currentPlayer.hand.filter(c => isMoveValid(c, gameState));
+        // Recalcular estado atual para evitar jogadas inválidas em cascata
+        const latestState = gameStateRef.current;
+        if (!latestState || latestState.players[latestState.currentPlayerIndex].id !== currentPlayer.id) return;
+
+        const validCards = currentPlayer.hand.filter(c => isMoveValid(c, latestState));
         
         if (validCards.length > 0) {
-          const cardToPlay = validCards[Math.floor(Math.random() * validCards.length)];
+          // Escolha inteligente: Prioriza cartas de ação se tiver mais de uma opção
+          const actionCards = validCards.filter(c => c.type !== CardType.NUMBER);
+          const cardToPlay = actionCards.length > 0 ? actionCards[0] : validCards[0];
+
           let chosenColor: CardColor | undefined;
-          
           if (cardToPlay.color === CardColor.WILD) {
-            // IA escolhe a cor que mais tem na mão
             const colorCounts: any = {};
             currentPlayer.hand.forEach(c => { if(c.color !== CardColor.WILD) colorCounts[c.color] = (colorCounts[c.color] || 0) + 1; });
             chosenColor = (Object.keys(colorCounts).reduce((a, b) => colorCounts[a] > colorCounts[b] ? a : b, CardColor.RED)) as CardColor;
           }
           
-          const willCallUno = currentPlayer.hand.length === 2;
-          handlePlayCard(currentPlayer.id, [cardToPlay.id], chosenColor, willCallUno);
+          handlePlayCard(currentPlayer.id, [cardToPlay.id], chosenColor, currentPlayer.hand.length === 2);
         } else {
           handleDrawCard(currentPlayer.id);
         }
@@ -72,7 +74,6 @@ const App: React.FC = () => {
     }
   }, [gameState?.currentPlayerIndex, gameState?.status, localPlayerId]);
 
-  // Inicializar Player ID e Perfil
   useEffect(() => {
     const init = async () => {
       let savedId = localStorage.getItem('uno_player_id');
@@ -81,7 +82,6 @@ const App: React.FC = () => {
         localStorage.setItem('uno_player_id', savedId);
       }
       setLocalPlayerId(savedId);
-
       const remote = await fetchProfile(savedId);
       if (remote) {
         setPlayerProfile(remote);
@@ -94,11 +94,9 @@ const App: React.FC = () => {
     init();
   }, []);
 
-  // Sync Supabase Realtime para Multiplayer Online
   useEffect(() => {
     if (!localPlayerId || !playerProfile.name) return;
 
-    // Canal de Presença e Ações
     const channel = supabase.channel('uno_global_arena', {
       config: { presence: { key: localPlayerId } }
     });
@@ -107,9 +105,7 @@ const App: React.FC = () => {
       .on('presence', { event: 'sync' }, () => {
         const state = channel.presenceState();
         const presences: any = {};
-        Object.keys(state).forEach(key => {
-          presences[key] = (state[key] as any)[0];
-        });
+        Object.keys(state).forEach(key => { presences[key] = (state[key] as any)[0]; });
         setOnlinePlayers(presences);
       })
       .on('broadcast', { event: 'game_action' }, ({ payload }) => {
@@ -119,6 +115,22 @@ const App: React.FC = () => {
       .on('broadcast', { event: 'sync_state' }, ({ payload }) => {
         if (payload.senderId === localPlayerId) return;
         setGameState(payload.state);
+      })
+      .on('broadcast', { event: 'player_joined_request' }, ({ payload }) => {
+        // LOGICA DE ENTRADA: O Host aceita novos jogadores
+        if (gameStateRef.current?.players[0].id === localPlayerId) {
+          if (gameStateRef.current.id === payload.roomId) {
+            setGameState(prev => {
+              if (!prev || prev.players.find(p => p.id === payload.id)) return prev;
+              let newPlayers = [...prev.players];
+              // Substituir um bot se houver espaço
+              const botIdx = newPlayers.findIndex(p => p.isBot);
+              if (botIdx !== -1) newPlayers.splice(botIdx, 1);
+              newPlayers.push(payload);
+              return { ...prev, players: newPlayers };
+            });
+          }
+        }
       })
       .subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
@@ -137,15 +149,10 @@ const App: React.FC = () => {
     return () => { channel.unsubscribe(); };
   }, [localPlayerId, playerProfile.name]);
 
-  // Sincronizar State para outros jogadores
   useEffect(() => {
     gameStateRef.current = gameState;
     if (gameState && gameState.players[0].id === localPlayerId && roomChannel) {
-      roomChannel.send({
-        type: 'broadcast',
-        event: 'sync_state',
-        payload: { state: gameState, senderId: localPlayerId }
-      });
+      roomChannel.send({ type: 'broadcast', event: 'sync_state', payload: { state: gameState, senderId: localPlayerId } });
     }
   }, [gameState]);
 
@@ -163,7 +170,6 @@ const App: React.FC = () => {
   };
 
   const handlePlayCard = (playerId: string, cardIds: string[], chosenColor?: CardColor, didCallUno?: boolean) => {
-    // Se não for o Host, envia a ação para o Host processar (Single Source of Truth)
     if (gameStateRef.current?.players[0].id !== localPlayerId) {
       roomChannel?.send({ type: 'broadcast', event: 'game_action', payload: { type: 'PLAY', playerId, cardIds, chosenColor, didCallUno, senderId: localPlayerId } });
       return;
