@@ -42,22 +42,28 @@ const App: React.FC = () => {
   // Inicializar Player ID e carregar do Supabase
   useEffect(() => {
     const init = async () => {
-      let savedId = localStorage.getItem('uno_player_id');
-      if (!savedId) {
-        savedId = Math.random().toString(36).substring(7);
-        localStorage.setItem('uno_player_id', savedId);
-      }
-      setLocalPlayerId(savedId);
+      try {
+        let savedId = localStorage.getItem('uno_player_id');
+        if (!savedId) {
+          savedId = Math.random().toString(36).substring(7);
+          localStorage.setItem('uno_player_id', savedId);
+        }
+        setLocalPlayerId(savedId);
 
-      // Tentar carregar perfil remoto do Supabase
-      const remoteProfile = await fetchProfile(savedId);
-      if (remoteProfile) {
-        setPlayerProfile(remoteProfile);
-        setCurrentView(AppView.PROFILE);
-      } else if (playerProfile.name) {
-        setCurrentView(AppView.PROFILE);
+        // Tentar carregar perfil remoto do Supabase
+        const remoteProfile = await fetchProfile(savedId);
+        if (remoteProfile) {
+          setPlayerProfile(remoteProfile);
+          if (remoteProfile.name) setCurrentView(AppView.PROFILE);
+        } else if (playerProfile.name) {
+          setCurrentView(AppView.PROFILE);
+        }
+      } catch (err) {
+        console.error("Erro na inicialização:", err);
+      } finally {
+        // Garante que a tela saia do loading mesmo se houver erro no banco
+        setIsLoading(false);
       }
-      setIsLoading(false);
     };
     init();
   }, []);
@@ -76,12 +82,12 @@ const App: React.FC = () => {
       localStorage.setItem('uno_coins', String(playerProfile.coins));
       localStorage.setItem('uno_level', String(playerProfile.level));
       localStorage.setItem('uno_xp', String(playerProfile.xp));
-      localStorage.setItem('uno_inventory', JSON.stringify(playerProfile.inventory));
+      localStorage.setItem('uno_inventory', JSON.stringify(playerProfile.inventory || ["default_skin"]));
       localStorage.setItem('uno_stats', JSON.stringify(playerProfile.stats));
       localStorage.setItem('uno_history', JSON.stringify(playerProfile.history));
       localStorage.setItem('uno_achievements', JSON.stringify(playerProfile.achievements));
       localStorage.setItem('uno_skin', playerProfile.equippedSkin);
-    }, 1500);
+    }, 2000);
 
     return () => clearTimeout(timeout);
   }, [playerProfile, localPlayerId, isLoading]);
@@ -354,7 +360,10 @@ const App: React.FC = () => {
     return (
       <div className="h-screen w-screen bg-[#022c22] flex flex-col items-center justify-center gap-6">
         <div className="w-24 h-24 border-8 border-yellow-500/20 border-t-yellow-500 rounded-full animate-spin"></div>
-        <p className="font-brand text-yellow-400 text-2xl animate-pulse italic">RESTAURANDO PERFIL...</p>
+        <div className="text-center">
+          <p className="font-brand text-yellow-400 text-3xl animate-pulse italic tracking-tighter">BATTLE ARENA</p>
+          <p className="text-white/20 font-black uppercase text-[10px] tracking-[0.5em] mt-2">Restaurando Perfil e Conexões...</p>
+        </div>
       </div>
     );
   }
