@@ -33,12 +33,7 @@ const UnoCard: React.FC<UnoCardProps> = ({ card, onClick, disabled, playable, si
     }
   };
 
-  // Fallback para quando card está indefinido ou vazio
-  const cardColor = card?.color || CardColor.WILD;
-  const cardType = card?.type || CardType.NUMBER;
-  const cardValue = card?.value;
-
-  if (hidden || !card) {
+  if (hidden) {
     const backGradient = skin === 'gold_skin' 
       ? 'from-yellow-600 via-yellow-400 to-yellow-800' 
       : 'from-red-700 via-red-800 to-zinc-950';
@@ -54,16 +49,14 @@ const UnoCard: React.FC<UnoCardProps> = ({ card, onClick, disabled, playable, si
     );
   }
 
-  const isWild = cardColor === CardColor.WILD;
-  const colorClass = skin === 'gold_skin' && cardColor !== CardColor.WILD ? '' : (COLOR_CLASSES[cardColor] || 'bg-zinc-800');
-  const label = cardType === CardType.NUMBER ? cardValue : CARD_LABELS[cardType];
+  const isWild = card.color === CardColor.WILD;
   
   return (
     <div
       onClick={onClick}
       className={`
         ${sizeClasses[size]} 
-        ${colorClass} 
+        ${skin === 'gold_skin' && card.color !== CardColor.WILD ? '' : COLOR_CLASSES[card.color]} 
         ${getSkinClasses()}
         rounded-xl border-[3px] lg:border-[4px] shadow-2xl flex items-center justify-center relative transition-all duration-300 overflow-visible
         ${playable ? 'ring-4 lg:ring-[10px] ring-yellow-400/60 scale-105 z-[100] shadow-[0_0_40px_rgba(250,204,21,0.5)]' : 'grayscale-[0.05]'}
@@ -71,11 +64,11 @@ const UnoCard: React.FC<UnoCardProps> = ({ card, onClick, disabled, playable, si
       `}
     >
       <div className="absolute top-1 left-2 font-black leading-none text-white text-[12px] lg:text-xl z-10 drop-shadow-lg">
-        {label}
+        {card.type === CardType.NUMBER ? card.value : CARD_LABELS[card.type]}
       </div>
       
       {isWild ? (
-        <div className={`w-12 h-12 lg:w-24 lg:h-24 rounded-full overflow-hidden flex flex-wrap -rotate-45 border-4 border-white/30 ${cardType === CardType.WILD_DRAW_FOUR ? 'animate-bounce' : ''}`}>
+        <div className={`w-12 h-12 lg:w-24 lg:h-24 rounded-full overflow-hidden flex flex-wrap -rotate-45 border-4 border-white/30 ${card.type === CardType.WILD_DRAW_FOUR ? 'animate-bounce' : ''}`}>
           <div className="w-1/2 h-1/2 bg-red-600"></div>
           <div className="w-1/2 h-1/2 bg-blue-600"></div>
           <div className="w-1/2 h-1/2 bg-green-600"></div>
@@ -84,13 +77,13 @@ const UnoCard: React.FC<UnoCardProps> = ({ card, onClick, disabled, playable, si
       ) : (
         <div className={`w-12 h-14 lg:w-24 lg:h-28 bg-white/20 rounded-[50%] flex items-center justify-center -rotate-12`}>
            <span className={`font-brand text-white text-3xl lg:text-7xl drop-shadow-[0_4px_4px_rgba(0,0,0,0.6)]`}>
-             {label}
+             {card.type === CardType.NUMBER ? card.value : CARD_LABELS[card.type]}
            </span>
         </div>
       )}
 
       <div className="absolute bottom-1 right-2 font-black leading-none rotate-180 text-white text-[12px] lg:text-xl z-10 drop-shadow-lg">
-        {label}
+        {card.type === CardType.NUMBER ? card.value : CARD_LABELS[card.type]}
       </div>
     </div>
   );
