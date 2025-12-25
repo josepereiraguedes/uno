@@ -8,14 +8,31 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 export const syncProfile = async (profileId: string, profileData: any) => {
   try {
+    // Garantir que não estamos enviando IDs nulos ou dados corrompidos
+    if (!profileId) return null;
+
     const { data, error } = await supabase
       .from('profiles')
-      .upsert({ id: profileId, ...profileData }, { onConflict: 'id' });
+      .upsert({ 
+        id: profileId, 
+        name: profileData.name,
+        avatar: profileData.avatar,
+        mmr: profileData.mmr,
+        coins: profileData.coins,
+        level: profileData.level,
+        xp: profileData.xp,
+        inventory: profileData.inventory,
+        equipped_skin: profileData.equippedSkin,
+        stats: profileData.stats,
+        history: profileData.history,
+        achievements: profileData.achievements,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'id' });
     
     if (error) throw error;
     return data;
   } catch (e) {
-    console.error('Erro ao sincronizar com Supabase:', e);
+    console.error('Erro de Sincronização Supabase:', e);
     return null;
   }
 };
@@ -28,8 +45,16 @@ export const fetchProfile = async (profileId: string) => {
       .eq('id', profileId)
       .single();
     
-    if (error) return null;
-    return data;
+    if (error) {
+      console.warn('Perfil não encontrado no Supabase, usando local.');
+      return null;
+    }
+
+    // Mapear campos do banco para o estado do app
+    return {
+      ...data,
+      equippedSkin: data.equipped_skin // Ajuste de snake_case para camelCase
+    };
   } catch (e) {
     return null;
   }

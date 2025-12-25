@@ -21,6 +21,7 @@ const App: React.FC = () => {
   const [localPlayerId, setLocalPlayerId] = useState<string | null>(null);
   const [onlinePlayers, setOnlinePlayers] = useState<Record<string, OnlinePresence>>({});
   const [reactions, setReactions] = useState<Record<string, EphemeralReaction>>({});
+  const [isLoading, setIsLoading] = useState(true);
   
   const gameStateRef = useRef<GameState | null>(null);
 
@@ -48,7 +49,7 @@ const App: React.FC = () => {
       }
       setLocalPlayerId(savedId);
 
-      // Tentar carregar perfil remoto
+      // Tentar carregar perfil remoto do Supabase
       const remoteProfile = await fetchProfile(savedId);
       if (remoteProfile) {
         setPlayerProfile(remoteProfile);
@@ -56,18 +57,19 @@ const App: React.FC = () => {
       } else if (playerProfile.name) {
         setCurrentView(AppView.PROFILE);
       }
+      setIsLoading(false);
     };
     init();
   }, []);
 
   // Sincronizar sempre que o perfil mudar (com debounce)
   useEffect(() => {
-    if (!localPlayerId || !playerProfile.name) return;
+    if (!localPlayerId || !playerProfile.name || isLoading) return;
     
     const timeout = setTimeout(() => {
       syncProfile(localPlayerId, playerProfile);
       
-      // Backup local
+      // Backup redundante no localStorage
       localStorage.setItem('uno_name', playerProfile.name);
       localStorage.setItem('uno_avatar', playerProfile.avatar);
       localStorage.setItem('uno_mmr', String(playerProfile.mmr));
@@ -79,10 +81,10 @@ const App: React.FC = () => {
       localStorage.setItem('uno_history', JSON.stringify(playerProfile.history));
       localStorage.setItem('uno_achievements', JSON.stringify(playerProfile.achievements));
       localStorage.setItem('uno_skin', playerProfile.equippedSkin);
-    }, 1000);
+    }, 1500);
 
     return () => clearTimeout(timeout);
-  }, [playerProfile, localPlayerId]);
+  }, [playerProfile, localPlayerId, isLoading]);
 
   useEffect(() => {
     const presenceInterval = setInterval(() => {
@@ -347,6 +349,15 @@ const App: React.FC = () => {
   };
 
   const handleTimeout = (playerId: string) => { if (gameStateRef.current?.players[0].id === localPlayerId) handleDrawCard(playerId); };
+
+  if (isLoading) {
+    return (
+      <div className="h-screen w-screen bg-[#022c22] flex flex-col items-center justify-center gap-6">
+        <div className="w-24 h-24 border-8 border-yellow-500/20 border-t-yellow-500 rounded-full animate-spin"></div>
+        <p className="font-brand text-yellow-400 text-2xl animate-pulse italic">RESTAURANDO PERFIL...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen w-screen flex flex-col bg-[#022c22] overflow-hidden text-white font-sans select-none">
