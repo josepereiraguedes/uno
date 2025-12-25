@@ -7,10 +7,9 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 export const syncProfile = async (profileId: string, profileData: any) => {
+  if (!profileId || !profileData.name) return null;
+  
   try {
-    // Garantir que não estamos enviando IDs nulos ou dados corrompidos
-    if (!profileId) return null;
-
     const { data, error } = await supabase
       .from('profiles')
       .upsert({ 
@@ -32,7 +31,6 @@ export const syncProfile = async (profileId: string, profileData: any) => {
     if (error) throw error;
     return data;
   } catch (e) {
-    console.error('Erro de Sincronização Supabase:', e);
     return null;
   }
 };
@@ -43,17 +41,13 @@ export const fetchProfile = async (profileId: string) => {
       .from('profiles')
       .select('*')
       .eq('id', profileId)
-      .single();
+      .maybeSingle(); // Uso do maybeSingle evita erro 406 se não houver dados
     
-    if (error) {
-      console.warn('Perfil não encontrado no Supabase, usando local.');
-      return null;
-    }
+    if (error || !data) return null;
 
-    // Mapear campos do banco para o estado do app
     return {
       ...data,
-      equippedSkin: data.equipped_skin // Ajuste de snake_case para camelCase
+      equippedSkin: data.equipped_skin
     };
   } catch (e) {
     return null;
