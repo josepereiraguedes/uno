@@ -40,31 +40,25 @@ const App: React.FC = () => {
     achievements: JSON.parse(localStorage.getItem('uno_achievements') || '[]')
   });
 
-  // IA DOS BOTS: Reforçada com verificação de turno e sincronização
+  // IA DOS BOTS (Somente Host processa)
   useEffect(() => {
     if (!gameState || gameState.status !== GameStatus.PLAYING) return;
-    
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
     const isHost = gameState.players[0].id === localPlayerId;
-
     if (currentPlayer && currentPlayer.isBot && isHost) {
       const botThinkTime = Math.random() * 1500 + 1500;
       const timeout = setTimeout(() => {
         const latestState = gameStateRef.current;
         if (!latestState || latestState.players[latestState.currentPlayerIndex].id !== currentPlayer.id) return;
-
         const validCards = currentPlayer.hand.filter(c => isMoveValid(c, latestState));
-        
         if (validCards.length > 0) {
           const cardToPlay = validCards[Math.floor(Math.random() * validCards.length)];
           let chosenColor: CardColor | undefined;
-          
           if (cardToPlay.color === CardColor.WILD) {
             const colorCounts: any = {};
             currentPlayer.hand.forEach(c => { if(c.color !== CardColor.WILD) colorCounts[c.color] = (colorCounts[c.color] || 0) + 1; });
-            chosenColor = (Object.keys(colorCounts).reduce((a, b) => colorCounts[a] > colorCounts[b] ? a : b, CardColor.RED)) as CardColor;
+            chosenColor = (Object.keys(colorCounts).reduce((a, b) => (colorCounts[a] || 0) > (colorCounts[b] || 0) ? a : b, CardColor.RED)) as CardColor;
           }
-          
           handlePlayCard(currentPlayer.id, [cardToPlay.id], chosenColor, currentPlayer.hand.length === 2);
         } else {
           handleDrawCard(currentPlayer.id);
@@ -74,7 +68,17 @@ const App: React.FC = () => {
     }
   }, [gameState?.currentPlayerIndex, gameState?.status, localPlayerId]);
 
-  // Inicializar Player ID
+  useEffect(() => {
+    if (localPlayerId && playerProfile.name) {
+      syncProfile(localPlayerId, playerProfile);
+      localStorage.setItem('uno_name', playerProfile.name);
+      localStorage.setItem('uno_avatar', playerProfile.avatar);
+      localStorage.setItem('uno_mmr', playerProfile.mmr.toString());
+      localStorage.setItem('uno_coins', playerProfile.coins.toString());
+      localStorage.setItem('uno_skin', playerProfile.equippedSkin);
+    }
+  }, [playerProfile]);
+
   useEffect(() => {
     const init = async () => {
       let savedId = localStorage.getItem('uno_player_id');
@@ -84,90 +88,60 @@ const App: React.FC = () => {
       }
       setLocalPlayerId(savedId);
       const remote = await fetchProfile(savedId);
-      if (remote) setPlayerProfile(remote);
+      if (remote) setPlayerProfile({ ...remote, equippedSkin: remote.equipped_skin || 'default' });
       if (remote?.name || playerProfile.name) setCurrentView(AppView.PROFILE);
       setIsLoading(false);
     };
     init();
   }, []);
 
-  // Canal de Lobby (Presença Global)
+  // LOBBY & PRESENCE
   useEffect(() => {
     if (!localPlayerId || !playerProfile.name) return;
-
-    const channel = supabase.channel('uno_lobby', {
-      config: { presence: { key: localPlayerId } }
+    const channel = supabase.channel('uno_lobby', { config: { presence: { key: localPlayerId } } });
+    channel.on('presence', { event: 'sync' }, () => {
+      const state = channel.presenceState();
+      const presences: any = {};
+      Object.keys(state).forEach(key => { presences[key] = (state[key] as any)[0]; });
+      setOnlinePlayers(presences);
+    }).on('broadcast', { event: 'player_joined_request' }, ({ payload }) => {
+      const currentRoom = gameStateRef.current;
+      if (currentRoom && currentRoom.id === payload.roomId && currentRoom.players[0].id === localPlayerId) {
+         setGameState(prev => {
+           if (!prev || prev.players.find(p => p.id === payload.id)) return prev;
+           const newPlayers = [...prev.players, payload];
+           return { ...prev, players: newPlayers };
+         });
+      }
+    }).subscribe(async (status) => {
+      if (status === 'SUBSCRIBED') {
+        await channel.track({ id: localPlayerId, name: playerProfile.name, avatar: playerProfile.avatar, rank: getRankFromMMR(playerProfile.mmr), currentRoomId: gameStateRef.current?.id });
+      }
     });
-
-    channel
-      .on('presence', { event: 'sync' }, () => {
-        const state = channel.presenceState();
-        const presences: any = {};
-        Object.keys(state).forEach(key => { presences[key] = (state[key] as any)[0]; });
-        setOnlinePlayers(presences);
-      })
-      .on('broadcast', { event: 'player_joined_request' }, ({ payload }) => {
-        // Se eu sou o host da sala solicitada, adiciono o jogador
-        const currentRoom = gameStateRef.current;
-        if (currentRoom && currentRoom.id === payload.roomId && currentRoom.players[0].id === localPlayerId) {
-           setGameState(prev => {
-             if (!prev || prev.players.find(p => p.id === payload.id)) return prev;
-             let newPlayers = [...prev.players];
-             const botIdx = newPlayers.findIndex(p => p.isBot);
-             if (botIdx !== -1) newPlayers.splice(botIdx, 1);
-             newPlayers.push(payload);
-             return { ...prev, players: newPlayers };
-           });
-        }
-      })
-      .subscribe(async (status) => {
-        if (status === 'SUBSCRIBED') {
-          await channel.track({
-            id: localPlayerId,
-            name: playerProfile.name,
-            avatar: playerProfile.avatar,
-            rank: getRankFromMMR(playerProfile.mmr),
-            currentRoomId: gameStateRef.current?.id
-          });
-        }
-      });
-
     lobbyChannel = channel;
     return () => { channel.unsubscribe(); };
   }, [localPlayerId, playerProfile.name, gameState?.id]);
 
-  // Canal de Sala (Comunicação Privada da Partida)
+  // ROOM SYNC
   useEffect(() => {
     if (!gameState?.id || !localPlayerId) return;
-
     if (roomChannel) roomChannel.unsubscribe();
-
     const channel = supabase.channel(`uno_room_${gameState.id}`);
-
-    channel
-      .on('broadcast', { event: 'game_action' }, ({ payload }) => {
-        if (payload.senderId === localPlayerId) return;
-        processRemoteAction(payload);
-      })
-      .on('broadcast', { event: 'sync_state' }, ({ payload }) => {
-        if (payload.senderId === localPlayerId) return;
-        setGameState(payload.state);
-      })
-      .subscribe();
-
+    channel.on('broadcast', { event: 'game_action' }, ({ payload }) => {
+      if (payload.senderId === localPlayerId) return;
+      processRemoteAction(payload);
+    }).on('broadcast', { event: 'sync_state' }, ({ payload }) => {
+      if (payload.senderId === localPlayerId) return;
+      setGameState(payload.state);
+    }).subscribe();
     roomChannel = channel;
     return () => { channel.unsubscribe(); };
   }, [gameState?.id, localPlayerId]);
 
-  // Sincronização de Estado pelo Host
   useEffect(() => {
     gameStateRef.current = gameState;
     if (gameState && gameState.players[0].id === localPlayerId && roomChannel) {
-      roomChannel.send({
-        type: 'broadcast',
-        event: 'sync_state',
-        payload: { state: gameState, senderId: localPlayerId }
-      });
+      roomChannel.send({ type: 'broadcast', event: 'sync_state', payload: { state: gameState, senderId: localPlayerId } });
     }
   }, [gameState]);
 
@@ -184,17 +158,28 @@ const App: React.FC = () => {
     setTimeout(() => { setReactions(prev => { const n = {...prev}; delete n[pid]; return n; }); }, 3000);
   };
 
+  const calculateWinnerScore = (winnerId: string, allPlayers: Player[]): number => {
+    let score = 0;
+    allPlayers.forEach(p => {
+      if (p.id === winnerId) return;
+      p.hand.forEach(card => {
+        if (card.type === CardType.NUMBER) score += (card.value || 0);
+        else if (card.type === CardType.WILD || card.type === CardType.WILD_DRAW_FOUR) score += 50;
+        else score += 20;
+      });
+    });
+    return Math.max(score, 50);
+  };
+
   const handlePlayCard = (playerId: string, cardIds: string[], chosenColor?: CardColor, didCallUno?: boolean) => {
     if (gameStateRef.current?.players[0].id !== localPlayerId) {
       roomChannel?.send({ type: 'broadcast', event: 'game_action', payload: { type: 'PLAY', playerId, cardIds, chosenColor, didCallUno, senderId: localPlayerId } });
       return;
     }
-
     setGameState(prev => {
       if (!prev || prev.status !== GameStatus.PLAYING) return prev;
       const pIdx = prev.players.findIndex(p => p.id === playerId);
       if (pIdx === -1) return prev;
-
       const player = { ...prev.players[pIdx] };
       const cardsToPlay = cardIds.map(id => player.hand.find(c => c.id === id)).filter((c): c is Card => !!c);
       const newHand = player.hand.filter(c => !cardIds.includes(c.id));
@@ -202,7 +187,6 @@ const App: React.FC = () => {
       let currentDir = prev.direction;
       let newPendingDraw = prev.pendingDrawCount;
       let totalSkips = 0;
-
       cardsToPlay.forEach(card => {
         const effect = applyCardEffect(card, { ...prev, direction: currentDir });
         currentDir = effect.direction;
@@ -211,25 +195,17 @@ const App: React.FC = () => {
       });
 
       if (newHand.length === 0) {
-        handleWin(player);
-        return { ...prev, status: GameStatus.FINISHED, winner: { ...player, hand: [] } };
+        const finalScore = calculateWinnerScore(playerId, prev.players);
+        const updatedWinner = { ...player, hand: [], score: finalScore };
+        handleWin(updatedWinner);
+        return { ...prev, status: GameStatus.FINISHED, winner: updatedWinner };
       }
 
       let nextIdx = pIdx;
       const jump = totalSkips > 0 ? totalSkips + 1 : 1;
       for (let i = 0; i < jump; i++) nextIdx = getNextPlayerIndex(nextIdx, currentDir, prev.players.length);
-      
       const lastCard = cardsToPlay[cardsToPlay.length - 1];
-      return { 
-        ...prev, 
-        players: prev.players.map((p, i) => i === pIdx ? { ...p, hand: newHand, hasCalledUno: !!didCallUno } : p), 
-        discardPile: [...prev.discardPile, ...cardsToPlay], 
-        currentColor: lastCard.color === CardColor.WILD ? (chosenColor || prev.currentColor) : lastCard.color, 
-        currentPlayerIndex: nextIdx, 
-        direction: currentDir, 
-        pendingDrawCount: newPendingDraw, 
-        turnStartTime: Date.now() 
-      };
+      return { ...prev, players: prev.players.map((p, i) => i === pIdx ? { ...p, hand: newHand, hasCalledUno: !!didCallUno } : p), discardPile: [...prev.discardPile, ...cardsToPlay], currentColor: lastCard.color === CardColor.WILD ? (chosenColor || prev.currentColor) : lastCard.color, currentPlayerIndex: nextIdx, direction: currentDir, pendingDrawCount: newPendingDraw, turnStartTime: Date.now() };
     });
   };
 
@@ -243,19 +219,10 @@ const App: React.FC = () => {
       const pIdx = prev.currentPlayerIndex;
       let deck = [...prev.deck];
       if (deck.length < 10) deck = [...deck, ...generateDeck()];
-      
       const player = { ...prev.players[pIdx], hasCalledUno: false };
       const drawAmount = prev.pendingDrawCount > 0 ? prev.pendingDrawCount : 1;
       player.hand = [...player.hand, ...deck.splice(0, drawAmount)];
-      
-      return { 
-        ...prev, 
-        players: prev.players.map((p, i) => i === pIdx ? player : p), 
-        deck, 
-        pendingDrawCount: 0, 
-        currentPlayerIndex: getNextPlayerIndex(pIdx, prev.direction, prev.players.length), 
-        turnStartTime: Date.now() 
-      };
+      return { ...prev, players: prev.players.map((p, i) => i === pIdx ? player : p), deck, pendingDrawCount: 0, currentPlayerIndex: getNextPlayerIndex(pIdx, prev.direction, prev.players.length), turnStartTime: Date.now() };
     });
   };
 
@@ -279,43 +246,34 @@ const App: React.FC = () => {
       setPlayerProfile((prev: any) => ({
         ...prev,
         mmr: prev.mmr + 25,
-        coins: prev.coins + 50,
+        coins: prev.coins + (winner.score || 50),
         stats: { ...prev.stats, wins: prev.stats.wins + 1, totalGames: prev.stats.totalGames + 1 }
+      }));
+    } else if (!winner.isBot) {
+       setPlayerProfile((prev: any) => ({
+        ...prev,
+        mmr: Math.max(0, prev.mmr - 15),
+        stats: { ...prev.stats, losses: prev.stats.losses + 1, totalGames: prev.stats.totalGames + 1 }
       }));
     }
   };
 
   const createRoom = (settings: GameSettings) => {
-    const host: Player = { ...playerProfile, id: localPlayerId!, hand: [], isHost: true, isBot: false, hasCalledUno: false } as any;
+    const host: Player = { ...playerProfile, id: localPlayerId!, hand: [], isHost: true, isBot: false, hasCalledUno: false, score: 0 } as any;
     let players = [host];
     if (settings.mode === GameMode.NORMAL) {
       for (let i = 0; i < settings.botCount; i++) {
-        players.push({ id: `bot-${i}`, name: `IA-${i+1}`, avatar: AVATARS[i % AVATARS.length], hand: [], isBot: true, mmr: 1000, hasCalledUno: false } as any);
+        players.push({ id: `bot-${i}`, name: `IA-${i+1}`, avatar: AVATARS[i % AVATARS.length], hand: [], isBot: true, mmr: 1000, hasCalledUno: false, score: 0 } as any);
       }
     }
-    setGameState({
-      id: Math.random().toString(36).substring(2, 8).toUpperCase(),
-      players,
-      status: GameStatus.LOBBY,
-      deck: generateDeck(),
-      discardPile: [],
-      currentPlayerIndex: 0,
-      direction: 1,
-      currentColor: CardColor.RED,
-      winner: null,
-      settings,
-      turnStartTime: Date.now(),
-      pendingDrawCount: 0
-    });
+    setGameState({ id: Math.random().toString(36).substring(2, 8).toUpperCase(), players, status: GameStatus.LOBBY, deck: generateDeck(), discardPile: [], currentPlayerIndex: 0, direction: 1, currentColor: CardColor.RED, winner: null, settings, turnStartTime: Date.now(), pendingDrawCount: 0 });
     setCurrentView(AppView.GAME);
   };
 
   const joinRoom = (roomId: string) => {
-    lobbyChannel?.send({ 
-      type: 'broadcast', 
-      event: 'player_joined_request', 
-      payload: { ...playerProfile, id: localPlayerId!, hand: [], isHost: false, isBot: false, hasCalledUno: false, roomId } 
-    });
+    const payload = { ...playerProfile, id: localPlayerId!, hand: [], isHost: false, isBot: false, hasCalledUno: false, roomId, score: 0 };
+    lobbyChannel?.send({ type: 'broadcast', event: 'player_joined_request', payload });
+    setGameState({ id: roomId, players: [], status: GameStatus.LOBBY, deck: [], discardPile: [], currentPlayerIndex: 0, direction: 1, currentColor: CardColor.RED, winner: null, settings: {} as any, turnStartTime: Date.now(), pendingDrawCount: 0 });
     setCurrentView(AppView.GAME);
   };
 
@@ -341,6 +299,7 @@ const App: React.FC = () => {
             gameState={gameState} 
             localPlayerId={localPlayerId!} 
             reactions={reactions}
+            equippedSkin={playerProfile.equippedSkin}
             onPlayCard={handlePlayCard} 
             onDrawCard={handleDrawCard} 
             onTimeout={(pid) => handleDrawCard(pid)}
