@@ -94,53 +94,98 @@ const App: React.FC = () => {
     init();
   }, []);
 
+  // LOBBY & PRESENCE
   useEffect(() => {
     if (!localPlayerId || !playerProfile.name) return;
-    const channel = supabase.channel('uno_lobby', { config: { presence: { key: localPlayerId } } });
-    channel.on('presence', { event: 'sync' }, () => {
-      const state = channel.presenceState();
-      const presences: any = {};
-      Object.keys(state).forEach(key => { presences[key] = (state[key] as any)[0]; });
-      setOnlinePlayers(presences);
-    }).on('broadcast', { event: 'player_joined_request' }, ({ payload }) => {
-      const currentRoom = gameStateRef.current;
-      if (currentRoom && currentRoom.id === payload.roomId && currentRoom.players[0]?.id === localPlayerId) {
-         setGameState(prev => {
-           if (!prev || prev.players.find(p => p.id === payload.id)) return prev;
-           const newPlayers = [...prev.players, payload];
-           const newState = { ...prev, players: newPlayers };
-           roomChannel?.send({ type: 'broadcast', event: 'sync_state', payload: { state: newState, senderId: localPlayerId } });
-           return newState;
-         });
-      }
-    }).subscribe(async (status) => {
-      if (status === 'SUBSCRIBED') {
-        await channel.track({ id: localPlayerId, name: playerProfile.name, avatar: playerProfile.avatar, rank: getRankFromMMR(playerProfile.mmr), currentRoomId: gameStateRef.current?.id });
-      }
+    
+    const channel = supabase.channel('uno_lobby', { 
+      config: { presence: { key: localPlayerId } } 
     });
+
+    channel
+      .on('presence', { event: 'sync' }, () => {
+        const state = channel.presenceState();
+        const presences: any = {};
+        Object.keys(state).forEach(key => { 
+          presences[key] = (state[key] as any)[0]; 
+        });
+        setOnlinePlayers(presences);
+      })
+      .on('broadcast', { event: 'player_joined_request' }, ({ payload }) => {
+        const currentRoom = gameStateRef.current;
+        if (currentRoom && currentRoom.id === payload.roomId && currentRoom.players[0]?.id === localPlayerId) {
+           setGameState(prev => {
+             if (!prev || prev.players.find(p => p.id === payload.id)) return prev;
+             const newPlayers = [...prev.players, payload];
+             const newState = { ...prev, players: newPlayers };
+             roomChannel?.send({ 
+               type: 'broadcast', 
+               event: 'sync_state', 
+               payload: { state: newState, senderId: localPlayerId } 
+             });
+             return newState;
+           });
+        }
+      })
+      .subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          await channel.track({ 
+            id: localPlayerId, 
+            name: playerProfile.name, 
+            avatar: playerProfile.avatar, 
+            rank: getRankFromMMR(playerProfile.mmr), 
+            currentRoomId: gameStateRef.current?.id 
+          });
+        }
+      });
+      
     lobbyChannel = channel;
     return () => { channel.unsubscribe(); };
-  }, [localPlayerId, playerProfile.name, gameState?.id]);
+  }, [localPlayerId, playerProfile.name]);
 
+  // CRITICAL: Atualiza o track de presença sempre que o ID da sala mudar
+  useEffect(() => {
+    if (lobbyChannel && localPlayerId && playerProfile.name) {
+      lobbyChannel.track({ 
+        id: localPlayerId, 
+        name: playerProfile.name, 
+        avatar: playerProfile.avatar, 
+        rank: getRankFromMMR(playerProfile.mmr), 
+        currentRoomId: gameState?.id 
+      });
+    }
+  }, [gameState?.id]);
+
+  // ROOM SYNC
   useEffect(() => {
     if (!gameState?.id || !localPlayerId) return;
     if (roomChannel) roomChannel.unsubscribe();
+    
     const channel = supabase.channel(`uno_room_${gameState.id}`);
-    channel.on('broadcast', { event: 'game_action' }, ({ payload }) => {
-      if (!payload || payload.senderId === localPlayerId) return;
-      processRemoteAction(payload);
-    }).on('broadcast', { event: 'sync_state' }, ({ payload }) => {
-      if (!payload || payload.senderId === localPlayerId) return;
-      setGameState(payload.state);
-    }).subscribe();
+    channel
+      .on('broadcast', { event: 'game_action' }, ({ payload }) => {
+        if (!payload || payload.senderId === localPlayerId) return;
+        processRemoteAction(payload);
+      })
+      .on('broadcast', { event: 'sync_state' }, ({ payload }) => {
+        if (!payload || payload.senderId === localPlayerId) return;
+        setGameState(payload.state);
+      })
+      .subscribe();
+      
     roomChannel = channel;
     return () => { channel.unsubscribe(); };
   }, [gameState?.id, localPlayerId]);
 
   useEffect(() => {
     gameStateRef.current = gameState;
+    // Apenas o Host propaga o estado global
     if (gameState && gameState.players.length > 0 && gameState.players[0].id === localPlayerId && roomChannel) {
-      roomChannel.send({ type: 'broadcast', event: 'sync_state', payload: { state: gameState, senderId: localPlayerId } });
+      roomChannel.send({ 
+        type: 'broadcast', 
+        event: 'sync_state', 
+        payload: { state: gameState, senderId: localPlayerId } 
+      });
     }
   }, [gameState]);
 
@@ -231,7 +276,6 @@ const App: React.FC = () => {
       if (!prev || prev.status !== GameStatus.PLAYING) return prev;
       const pIdx = prev.currentPlayerIndex;
       let deck = [...prev.deck];
-      // REABASTECIMENTO AUTOMÁTICO DO BARALHO
       if (deck.length < 15) deck = [...deck, ...generateDeck()];
       
       const player = { ...prev.players[pIdx], hasCalledUno: false };
@@ -257,7 +301,7 @@ const App: React.FC = () => {
     setGameState(prev => {
       if (!prev) return null;
       let deck = [...prev.deck];
-      if (deck.length < 50) deck = generateDeck(); // Garante baralho cheio no início
+      if (deck.length < 50) deck = generateDeck();
       
       const players = prev.players.map(p => ({ ...p, hand: deck.splice(0, prev.settings.initialCardsCount) }));
       const initialCard = deck.splice(0, 1)[0] || { id: 'init', color: CardColor.RED, type: CardType.NUMBER, value: 7 };
@@ -300,7 +344,21 @@ const App: React.FC = () => {
         players.push({ id: `bot-${i}`, name: `IA-${i+1}`, avatar: AVATARS[i % AVATARS.length], hand: [], isBot: true, mmr: 1000, hasCalledUno: false, score: 0 } as any);
       }
     }
-    setGameState({ id: Math.random().toString(36).substring(2, 8).toUpperCase(), players, status: GameStatus.LOBBY, deck: generateDeck(), discardPile: [], currentPlayerIndex: 0, direction: 1, currentColor: CardColor.RED, winner: null, settings, turnStartTime: Date.now(), pendingDrawCount: 0 });
+    const roomId = Math.random().toString(36).substring(2, 8).toUpperCase();
+    setGameState({ 
+      id: roomId, 
+      players, 
+      status: GameStatus.LOBBY, 
+      deck: generateDeck(), 
+      discardPile: [], 
+      currentPlayerIndex: 0, 
+      direction: 1, 
+      currentColor: CardColor.RED, 
+      winner: null, 
+      settings, 
+      turnStartTime: Date.now(), 
+      pendingDrawCount: 0 
+    });
     setCurrentView(AppView.GAME);
   };
 

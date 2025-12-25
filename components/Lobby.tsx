@@ -23,8 +23,10 @@ const Lobby: React.FC<LobbyProps> = ({ onBack, onCreateRoom, onJoinRoom, onlineP
   });
 
   const isCasual = settings.mode === GameMode.NORMAL;
-  // No casual precisa de bots se estiver só. No Ranked precisa de players reais (validado no GameTable)
   const canCreate = isCasual ? settings.botCount >= 1 : true;
+
+  // Filtramos apenas jogadores que possuem um RoomId ativo (estão hosteando salas)
+  const activeRooms = onlinePlayers.filter(p => p.currentRoomId);
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center p-6 animate-fade-in relative z-10 overflow-hidden">
@@ -75,10 +77,10 @@ const Lobby: React.FC<LobbyProps> = ({ onBack, onCreateRoom, onJoinRoom, onlineP
                       onChange={(e) => setSettings({...settings, turnTimeLimit: Number(e.target.value)})} 
                       className="bg-[#021a14] text-yellow-400 font-brand text-lg outline-none p-2 rounded-xl border border-white/10 cursor-pointer hover:bg-black/60 transition-colors"
                     >
-                      <option value={10} className="bg-[#021a14] text-white">10 Segundos</option>
-                      <option value={15} className="bg-[#021a14] text-white">15 Segundos</option>
-                      <option value={30} className="bg-[#021a14] text-white">30 Segundos</option>
-                      <option value={60} className="bg-[#021a14] text-white">60 Segundos</option>
+                      <option value={10}>10 Segundos</option>
+                      <option value={15}>15 Segundos</option>
+                      <option value={30}>30 Segundos</option>
+                      <option value={60}>60 Segundos</option>
                     </select>
                  </div>
                  <button 
@@ -112,13 +114,16 @@ const Lobby: React.FC<LobbyProps> = ({ onBack, onCreateRoom, onJoinRoom, onlineP
           </div>
 
           <div className="flex-1 overflow-y-auto space-y-4 no-scrollbar pr-2">
-            {onlinePlayers.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center opacity-10 text-center space-y-4">
-                <span className="text-7xl">🔭</span>
-                <p className="font-bold uppercase tracking-[0.3em] text-[10px] px-12">Buscando arenas ativas nos servidores...</p>
+            {activeRooms.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-center space-y-4">
+                <span className="text-7xl opacity-10">🔭</span>
+                <div className="space-y-1">
+                  <p className="font-bold uppercase tracking-[0.3em] text-[10px] text-white/20">Nenhuma sala ativa no momento</p>
+                  <p className="text-[8px] text-white/10 uppercase tracking-widest">Seja o primeiro a criar uma arena!</p>
+                </div>
               </div>
             ) : (
-              onlinePlayers.map(p => (
+              activeRooms.map(p => (
                 <div key={p.id} className="bg-white/5 p-5 rounded-3xl border border-white/5 flex items-center justify-between hover:bg-white/10 transition-all group animate-slide-up shadow-lg">
                    <div className="flex items-center gap-5">
                       <div className="w-14 h-14 rounded-full bg-black/40 flex items-center justify-center text-4xl border-2 border-white/10 transition-transform group-hover:scale-110">{p.avatar}</div>
@@ -127,16 +132,26 @@ const Lobby: React.FC<LobbyProps> = ({ onBack, onCreateRoom, onJoinRoom, onlineP
                         <p className="text-[10px] text-yellow-500 font-black uppercase tracking-widest">{p.rank}</p>
                       </div>
                    </div>
-                   {p.currentRoomId ? (
-                     <button onClick={() => onJoinRoom(p.currentRoomId!)} className="px-8 py-3 bg-blue-600 rounded-2xl font-brand text-sm hover:bg-blue-500 shadow-xl transition-all active:scale-90 text-white">ENTRAR</button>
-                   ) : (
-                     <div className="flex flex-col items-end gap-1 opacity-20">
-                       <span className="text-[8px] font-black uppercase tracking-widest">NO MENU</span>
-                       <div className="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></div>
-                     </div>
-                   )}
+                   <button 
+                    onClick={() => onJoinRoom(p.currentRoomId!)} 
+                    className="px-8 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl font-brand text-sm shadow-xl transition-all active:scale-90 border-b-4 border-blue-800"
+                   >
+                     ENTRAR
+                   </button>
                 </div>
               ))
+            )}
+            
+            {/* Lista extra para jogadores no menu (opcional, menor destaque) */}
+            {onlinePlayers.filter(p => !p.currentRoomId).length > 0 && (
+              <div className="pt-8 opacity-20">
+                <p className="text-[8px] font-black uppercase tracking-[0.5em] mb-4 text-center">Jogadores no Menu</p>
+                <div className="flex flex-wrap justify-center gap-2">
+                   {onlinePlayers.filter(p => !p.currentRoomId).map(p => (
+                     <div key={p.id} className="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-sm border border-white/5">{p.avatar}</div>
+                   ))}
+                </div>
+              </div>
             )}
           </div>
         </div>
