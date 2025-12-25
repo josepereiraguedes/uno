@@ -29,7 +29,12 @@ export const calculateMMRGain = (isWinner: boolean, state: GameState): number =>
 };
 
 export const isMoveValid = (card: Card, gameState: GameState): boolean => {
+  if (!card || !gameState) return false;
+  
   const topDiscard = gameState.discardPile[gameState.discardPile.length - 1];
+  // Se não houver carta no descarte, qualquer carta é válida (ocorre no início extremo)
+  if (!topDiscard) return true;
+
   const currentColor = gameState.currentColor;
   const currentPlayer = gameState.players[gameState.currentPlayerIndex];
 
@@ -46,6 +51,7 @@ export const isMoveValid = (card: Card, gameState: GameState): boolean => {
 
   // Coringa +4 restrição
   if (card.type === CardType.WILD_DRAW_FOUR) {
+    if (!currentPlayer) return true;
     const hasCurrentColor = currentPlayer.hand.some(c => c.color === currentColor && c.color !== CardColor.WILD);
     return !hasCurrentColor;
   }
@@ -65,6 +71,7 @@ export const isMoveValid = (card: Card, gameState: GameState): boolean => {
 };
 
 export const getNextPlayerIndex = (currentIndex: number, direction: 1 | -1, totalPlayers: number): number => {
+  if (totalPlayers <= 0) return 0;
   let next = currentIndex + direction;
   if (next >= totalPlayers) next = 0;
   if (next < 0) next = totalPlayers - 1;
@@ -75,6 +82,8 @@ export const applyCardEffect = (card: Card, state: GameState): { direction: 1 | 
   let direction: 1 | -1 = state.direction;
   let skipNext = false;
   let drawCount = 0;
+
+  if (!card) return { direction, skipNext, drawCount };
 
   switch (card.type) {
     case CardType.SKIP:

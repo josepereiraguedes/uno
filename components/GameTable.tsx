@@ -23,9 +23,7 @@ interface GameTableProps {
 }
 
 const GameTable: React.FC<GameTableProps> = ({ gameState, localPlayerId, equippedSkin, reactions, onPlayCard, onDrawCard, onCallUno, onSendReaction, onTimeout, onSendVoice, onStartGame, onLeaveRoom, onlinePlayers }) => {
-  // SEGURANÇA: Busca o jogador local no estado sincronizado
   const localPlayer = gameState?.players.find(p => p.id === localPlayerId);
-  // SEGURANÇA: Busca o jogador atual do turno
   const currentPlayer = gameState?.players[gameState.currentPlayerIndex] || gameState?.players[0];
   const isMyTurn = gameState?.status === GameStatus.PLAYING && currentPlayer?.id === localPlayerId;
   
@@ -42,7 +40,6 @@ const GameTable: React.FC<GameTableProps> = ({ gameState, localPlayerId, equippe
   const lastSecondRef = useRef<number>(-1);
   const ALL_EMOJIS = ['😂', '😈', '😡', '🃏', '😎', '💩', '👋', '🤫', '🤡', '💀', '🔥', '👑', '🤢', '👽', '👻', '💎'];
 
-  // Timer de Turno
   useEffect(() => {
     if (!gameState || gameState.status !== GameStatus.PLAYING || !currentPlayer) return;
     const interval = setInterval(() => {
@@ -63,15 +60,12 @@ const GameTable: React.FC<GameTableProps> = ({ gameState, localPlayerId, equippe
     return () => clearInterval(interval);
   }, [gameState?.turnStartTime, gameState?.currentPlayerIndex, gameState?.status]);
 
-  // Reset de seleção ao mudar de turno
   useEffect(() => {
     setSelectedIds([]);
     setUnoDeclared(false);
     if (isMyTurn) audio.play('click');
   }, [gameState?.currentPlayerIndex]);
 
-  // Bloqueio de renderização se os dados básicos não estiverem prontos (Evita a Tela Verde)
-  // Agora validamos se o localPlayer existe no array, o que confirma que o Host processou a entrada.
   if (!gameState || !localPlayer || !gameState.settings || gameState.players.length === 0) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center bg-[#022c22] gap-6 animate-fade-in">
@@ -96,10 +90,12 @@ const GameTable: React.FC<GameTableProps> = ({ gameState, localPlayerId, equippe
     if (!isMyTurn) return;
     const card = localPlayer.hand.find(c => c.id === id);
     if (!card) return;
+
     if (selectedIds.includes(id)) {
       setSelectedIds(prev => prev.filter(i => i !== id));
       return;
     }
+
     if (selectedIds.length === 0) {
       if (isMoveValid(card, gameState)) {
         if (card.color === CardColor.WILD) setShowPicker(true);
@@ -107,11 +103,19 @@ const GameTable: React.FC<GameTableProps> = ({ gameState, localPlayerId, equippe
         audio.play('click');
       }
     } else if (gameState.settings?.mirrorRuleEnabled) {
-      const firstCard = localPlayer.hand.find(c => c.id === selectedIds[0])!;
-      const sameValue = card.type === firstCard.type && (card.type === CardType.NUMBER ? card.value === firstCard.value : true);
-      if (sameValue && card.color !== CardColor.WILD) {
-        setSelectedIds(prev => [...prev, id]);
-        audio.play('click');
+      // CORREÇÃO: Verificação segura para evitar 'reading type of undefined'
+      const firstCardId = selectedIds[0];
+      const firstCard = localPlayer.hand.find(c => c.id === firstCardId);
+      
+      if (firstCard) {
+        const sameValue = card.type === firstCard.type && (card.type === CardType.NUMBER ? card.value === firstCard.value : true);
+        if (sameValue && card.color !== CardColor.WILD) {
+          setSelectedIds(prev => [...prev, id]);
+          audio.play('click');
+        }
+      } else {
+        // Se a primeira carta sumiu (sync de rede), reinicia a seleção
+        setSelectedIds([id]);
       }
     }
   };
@@ -132,11 +136,10 @@ const GameTable: React.FC<GameTableProps> = ({ gameState, localPlayerId, equippe
     );
   };
 
-  // TELA DE LOBBY (PRÉ-JOGO)
   if (gameState.status === GameStatus.LOBBY) {
     const humans = gameState.players.filter(p => !p.isBot).length;
     const bots = gameState.players.filter(p => p.isBot).length;
-    const canStart = humans + bots >= 2;
+    const canStart = (humans + bots) >= 2;
     return (
         <div className="flex-1 flex flex-col lg:flex-row h-full animate-fade-in z-10 overflow-hidden relative bg-[#022c22]">
           <button onClick={onLeaveRoom} className="absolute top-4 left-4 z-[200] bg-white/5 hover:bg-red-600/20 text-white/40 hover:text-white px-4 py-3 rounded-2xl border border-white/10 transition-all font-black uppercase text-[10px] tracking-widest">🚪 SAIR</button>
@@ -175,22 +178,18 @@ const GameTable: React.FC<GameTableProps> = ({ gameState, localPlayerId, equippe
 
   const topDiscard = gameState.discardPile[gameState.discardPile.length - 1];
 
-  // TELA DE JOGO ATIVO
   return (
     <div className="flex-1 flex flex-col h-full relative overflow-hidden bg-[#022c22]">
       <div className={`absolute inset-0 opacity-10 pointer-events-none transition-colors duration-1000 ${COLOR_CLASSES[gameState.currentColor]}`}></div>
       
-      {/* Botão de Configurações */}
       <div className="absolute top-4 right-4 flex gap-2 z-[200]">
         <button onClick={() => setShowAudioSettings(!showAudioSettings)} className="w-12 h-12 rounded-full bg-black/60 flex items-center justify-center text-2xl border border-white/10 shadow-2xl hover:bg-black/80 transition-all active:scale-90">⚙️</button>
       </div>
 
-      {/* Modal de Áudio */}
       {showAudioSettings && (
         <div className="fixed inset-0 bg-black/90 backdrop-blur-xl z-[1000] flex items-center justify-center p-6 animate-fade-in" onClick={() => setShowAudioSettings(false)}>
            <div className="bg-emerald-950 p-10 rounded-[3.5rem] border border-white/10 w-full max-w-sm shadow-[0_0_100px_rgba(0,0,0,0.5)]" onClick={e => e.stopPropagation()}>
               <h3 className="text-3xl font-brand text-yellow-400 mb-8 italic text-center tracking-widest uppercase">Central de Som</h3>
-              
               <div className="space-y-8">
                  <div className="bg-black/40 p-6 rounded-3xl border border-white/5">
                     <div className="flex justify-between items-center mb-4">
@@ -198,11 +197,7 @@ const GameTable: React.FC<GameTableProps> = ({ gameState, localPlayerId, equippe
                       <span className="text-yellow-400 font-brand">{Math.round(vol * 100)}%</span>
                     </div>
                     <input 
-                      type="range" 
-                      min="0" 
-                      max="1" 
-                      step="0.01" 
-                      value={vol} 
+                      type="range" min="0" max="1" step="0.01" value={vol} 
                       onChange={e => { 
                         const v = parseFloat(e.target.value); 
                         setVol(v); 
@@ -211,36 +206,35 @@ const GameTable: React.FC<GameTableProps> = ({ gameState, localPlayerId, equippe
                       className="w-full h-2 bg-white/10 rounded-full appearance-none accent-yellow-500 cursor-pointer" 
                     />
                  </div>
-
                  <div className="grid grid-cols-1 gap-3">
                    <button onClick={() => audio.nextTrack()} className="w-full py-4 bg-white/5 hover:bg-white/10 rounded-2xl font-bold uppercase text-[10px] tracking-widest text-white/60 transition-all border border-white/5">Trocar Música 🎵</button>
                    <button onClick={() => { audio.toggleMute(); setVol(audio.getVolume()); }} className={`w-full py-4 rounded-2xl font-bold uppercase text-[10px] tracking-widest transition-all border ${audio.getMuteStatus() ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/20' : 'bg-red-600/20 text-red-400 border-red-500/20'}`}>
                       {audio.getMuteStatus() ? 'Ativar Som 🔊' : 'Silenciar Tudo 🔇'}
                    </button>
                  </div>
-
                  <button onClick={() => setShowAudioSettings(false)} className="w-full py-5 bg-yellow-500 text-emerald-950 rounded-2xl font-brand text-2xl shadow-xl hover:bg-yellow-400 transition-all">SALVAR</button>
               </div>
            </div>
         </div>
       )}
 
-      {/* Jogadores Oponentes */}
       <div className="h-24 lg:h-32 flex justify-center items-center gap-3 lg:gap-16 px-4 z-50 pt-4">
         {gameState.players.filter(p => p.id !== localPlayerId).map((opp) => (
           <PlayerVisual key={opp.id} p={opp} />
         ))}
       </div>
 
-      {/* Centro da Mesa */}
       <div className="flex-1 flex items-center justify-center relative scale-90 lg:scale-100 z-20">
         <div className="flex items-center gap-12 lg:gap-24 relative">
           <button onClick={() => isMyTurn && onDrawCard(localPlayerId)} disabled={!isMyTurn} className={`transform active:scale-95 transition-all ${isMyTurn ? 'cursor-pointer hover:scale-110' : 'opacity-20'}`}>
             <UnoCard card={{} as any} hidden size="md" />
           </button>
           <div className="relative group">
-            <UnoCard card={topDiscard} skin={equippedSkin} size="md" disabled />
-            <div className={`absolute -top-4 -right-4 lg:-top-6 lg:-right-6 w-12 h-12 lg:w-16 lg:h-16 rounded-full border-4 border-white shadow-2xl ${COLOR_CLASSES[gameState.currentColor]} animate-pulse`}></div>
+            {/* CORREÇÃO: Passagem segura da carta de topo */}
+            <UnoCard card={topDiscard || ({} as any)} skin={equippedSkin} size="md" disabled={!topDiscard} />
+            {topDiscard && (
+              <div className={`absolute -top-4 -right-4 lg:-top-6 lg:-right-6 w-12 h-12 lg:w-16 lg:h-16 rounded-full border-4 border-white shadow-2xl ${COLOR_CLASSES[gameState.currentColor]} animate-pulse`}></div>
+            )}
             {gameState.pendingDrawCount > 0 && (
               <div className="absolute -bottom-4 -left-4 bg-red-600 text-white px-4 py-1.5 rounded-full font-brand text-xl shadow-2xl animate-bounce border-2 border-white">+{gameState.pendingDrawCount}</div>
             )}
@@ -248,7 +242,6 @@ const GameTable: React.FC<GameTableProps> = ({ gameState, localPlayerId, equippe
         </div>
       </div>
 
-      {/* Rodapé do Jogador */}
       <div className="h-[45%] flex flex-col items-center justify-end z-[100] relative pb-4">
         {isMyTurn && <div className="bg-yellow-500 text-emerald-950 px-8 py-2 rounded-full font-brand text-sm lg:text-2xl shadow-2xl border-2 border-white animate-bounce mb-3 uppercase tracking-tighter">Sua Vez!</div>}
         
@@ -272,7 +265,6 @@ const GameTable: React.FC<GameTableProps> = ({ gameState, localPlayerId, equippe
            </div>
         </div>
 
-        {/* Mão de Cartas */}
         <div className="w-full h-36 lg:h-48 overflow-visible">
           <div className="flex justify-center items-end w-full max-w-full overflow-visible px-4 h-full">
             {localPlayer.hand.map((card, i) => {
@@ -295,7 +287,6 @@ const GameTable: React.FC<GameTableProps> = ({ gameState, localPlayerId, equippe
         </div>
       </div>
 
-      {/* Menus de Interação */}
       {showEmojiMenu && (
         <div className="fixed inset-0 bg-black/40 z-[600]" onClick={() => setShowEmojiMenu(false)}>
           <div className="absolute bottom-48 left-1/2 -translate-x-1/2 lg:left-24 lg:translate-x-0 bg-[#011a14] p-5 rounded-[2.5rem] border border-white/10 grid grid-cols-4 gap-3 animate-slide-up shadow-[0_0_50px_rgba(0,0,0,0.8)]" onClick={e => e.stopPropagation()}>
@@ -312,7 +303,6 @@ const GameTable: React.FC<GameTableProps> = ({ gameState, localPlayerId, equippe
         </div>
       )}
 
-      {/* Seletor de Cores Coringa */}
       {showPicker && (
         <div className="fixed inset-0 bg-black/95 backdrop-blur-3xl z-[1100] flex items-center justify-center animate-fade-in p-6">
            <div className="bg-emerald-950/40 p-10 rounded-[4rem] border border-white/10 text-center max-w-sm w-full shadow-2xl">

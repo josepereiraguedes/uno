@@ -40,7 +40,6 @@ const App: React.FC = () => {
     achievements: JSON.parse(localStorage.getItem('uno_achievements') || '[]')
   });
 
-  // IA DOS BOTS
   useEffect(() => {
     if (!gameState || gameState.status !== GameStatus.PLAYING) return;
     const currentPlayer = gameState.players[gameState.currentPlayerIndex];
@@ -95,7 +94,6 @@ const App: React.FC = () => {
     init();
   }, []);
 
-  // LOBBY & PRESENCE
   useEffect(() => {
     if (!localPlayerId || !playerProfile.name) return;
     const channel = supabase.channel('uno_lobby', { config: { presence: { key: localPlayerId } } });
@@ -106,13 +104,11 @@ const App: React.FC = () => {
       setOnlinePlayers(presences);
     }).on('broadcast', { event: 'player_joined_request' }, ({ payload }) => {
       const currentRoom = gameStateRef.current;
-      // Somente o Host processa o pedido de entrada
-      if (currentRoom && currentRoom.id === payload.roomId && currentRoom.players[0].id === localPlayerId) {
+      if (currentRoom && currentRoom.id === payload.roomId && currentRoom.players[0]?.id === localPlayerId) {
          setGameState(prev => {
            if (!prev || prev.players.find(p => p.id === payload.id)) return prev;
            const newPlayers = [...prev.players, payload];
            const newState = { ...prev, players: newPlayers };
-           // Força sincronização imediata para o novo jogador
            roomChannel?.send({ type: 'broadcast', event: 'sync_state', payload: { state: newState, senderId: localPlayerId } });
            return newState;
          });
@@ -126,28 +122,23 @@ const App: React.FC = () => {
     return () => { channel.unsubscribe(); };
   }, [localPlayerId, playerProfile.name, gameState?.id]);
 
-  // ROOM SYNC
   useEffect(() => {
     if (!gameState?.id || !localPlayerId) return;
     if (roomChannel) roomChannel.unsubscribe();
-    
     const channel = supabase.channel(`uno_room_${gameState.id}`);
     channel.on('broadcast', { event: 'game_action' }, ({ payload }) => {
-      if (payload.senderId === localPlayerId) return;
+      if (!payload || payload.senderId === localPlayerId) return;
       processRemoteAction(payload);
     }).on('broadcast', { event: 'sync_state' }, ({ payload }) => {
-      if (payload.senderId === localPlayerId) return;
-      // Guest recebe o estado completo do Host aqui
+      if (!payload || payload.senderId === localPlayerId) return;
       setGameState(payload.state);
     }).subscribe();
-    
     roomChannel = channel;
     return () => { channel.unsubscribe(); };
   }, [gameState?.id, localPlayerId]);
 
   useEffect(() => {
     gameStateRef.current = gameState;
-    // Somente o Host faz o broadcast automático do estado ao mudar
     if (gameState && gameState.players.length > 0 && gameState.players[0].id === localPlayerId && roomChannel) {
       roomChannel.send({ type: 'broadcast', event: 'sync_state', payload: { state: gameState, senderId: localPlayerId } });
     }
@@ -171,6 +162,7 @@ const App: React.FC = () => {
     allPlayers.forEach(p => {
       if (p.id === winnerId) return;
       p.hand.forEach(card => {
+        if (!card) return;
         if (card.type === CardType.NUMBER) score += (card.value || 0);
         else if (card.type === CardType.WILD || card.type === CardType.WILD_DRAW_FOUR) score += 50;
         else score += 20;
@@ -180,7 +172,7 @@ const App: React.FC = () => {
   };
 
   const handlePlayCard = (playerId: string, cardIds: string[], chosenColor?: CardColor, didCallUno?: boolean) => {
-    if (gameStateRef.current?.players[0].id !== localPlayerId) {
+    if (gameStateRef.current?.players[0]?.id !== localPlayerId) {
       roomChannel?.send({ type: 'broadcast', event: 'game_action', payload: { type: 'PLAY', playerId, cardIds, chosenColor, didCallUno, senderId: localPlayerId } });
       return;
     }
@@ -190,11 +182,14 @@ const App: React.FC = () => {
       if (pIdx === -1) return prev;
       const player = { ...prev.players[pIdx] };
       const cardsToPlay = cardIds.map(id => player.hand.find(c => c.id === id)).filter((c): c is Card => !!c);
+      if (cardsToPlay.length === 0) return prev;
+      
       const newHand = player.hand.filter(c => !cardIds.includes(c.id));
       
       let currentDir = prev.direction;
       let newPendingDraw = prev.pendingDrawCount;
       let totalSkips = 0;
+      
       cardsToPlay.forEach(card => {
         const effect = applyCardEffect(card, { ...prev, direction: currentDir });
         currentDir = effect.direction;
@@ -213,12 +208,22 @@ const App: React.FC = () => {
       const jump = totalSkips > 0 ? totalSkips + 1 : 1;
       for (let i = 0; i < jump; i++) nextIdx = getNextPlayerIndex(nextIdx, currentDir, prev.players.length);
       const lastCard = cardsToPlay[cardsToPlay.length - 1];
-      return { ...prev, players: prev.players.map((p, i) => i === pIdx ? { ...p, hand: newHand, hasCalledUno: !!didCallUno } : p), discardPile: [...prev.discardPile, ...cardsToPlay], currentColor: lastCard.color === CardColor.WILD ? (chosenColor || prev.currentColor) : lastCard.color, currentPlayerIndex: nextIdx, direction: currentDir, pendingDrawCount: newPendingDraw, turnStartTime: Date.now() };
+      
+      return { 
+        ...prev, 
+        players: prev.players.map((p, i) => i === pIdx ? { ...p, hand: newHand, hasCalledUno: !!didCallUno } : p), 
+        discardPile: [...prev.discardPile, ...cardsToPlay], 
+        currentColor: lastCard.color === CardColor.WILD ? (chosenColor || prev.currentColor) : lastCard.color, 
+        currentPlayerIndex: nextIdx, 
+        direction: currentDir, 
+        pendingDrawCount: newPendingDraw, 
+        turnStartTime: Date.now() 
+      };
     });
   };
 
   const handleDrawCard = (playerId: string) => {
-    if (gameStateRef.current?.players[0].id !== localPlayerId) {
+    if (gameStateRef.current?.players[0]?.id !== localPlayerId) {
       roomChannel?.send({ type: 'broadcast', event: 'game_action', payload: { type: 'DRAW', playerId, senderId: localPlayerId } });
       return;
     }
@@ -226,25 +231,46 @@ const App: React.FC = () => {
       if (!prev || prev.status !== GameStatus.PLAYING) return prev;
       const pIdx = prev.currentPlayerIndex;
       let deck = [...prev.deck];
-      if (deck.length < 10) deck = [...deck, ...generateDeck()];
+      // REABASTECIMENTO AUTOMÁTICO DO BARALHO
+      if (deck.length < 15) deck = [...deck, ...generateDeck()];
+      
       const player = { ...prev.players[pIdx], hasCalledUno: false };
       const drawAmount = prev.pendingDrawCount > 0 ? prev.pendingDrawCount : 1;
       player.hand = [...player.hand, ...deck.splice(0, drawAmount)];
-      return { ...prev, players: prev.players.map((p, i) => i === pIdx ? player : p), deck, pendingDrawCount: 0, currentPlayerIndex: getNextPlayerIndex(pIdx, prev.direction, prev.players.length), turnStartTime: Date.now() };
+      
+      return { 
+        ...prev, 
+        players: prev.players.map((p, i) => i === pIdx ? player : p), 
+        deck, 
+        pendingDrawCount: 0, 
+        currentPlayerIndex: getNextPlayerIndex(pIdx, prev.direction, prev.players.length), 
+        turnStartTime: Date.now() 
+      };
     });
   };
 
   const startGame = () => {
-    if (gameStateRef.current?.players[0].id !== localPlayerId) {
+    if (gameStateRef.current?.players[0]?.id !== localPlayerId) {
       roomChannel?.send({ type: 'broadcast', event: 'game_action', payload: { type: 'START', senderId: localPlayerId } });
       return;
     }
     setGameState(prev => {
       if (!prev) return null;
       let deck = [...prev.deck];
+      if (deck.length < 50) deck = generateDeck(); // Garante baralho cheio no início
+      
       const players = prev.players.map(p => ({ ...p, hand: deck.splice(0, prev.settings.initialCardsCount) }));
-      const initialCard = deck.splice(0, 1)[0];
-      return { ...prev, players, deck, discardPile: [initialCard], status: GameStatus.PLAYING, currentColor: initialCard.color === CardColor.WILD ? CardColor.RED : initialCard.color, turnStartTime: Date.now() };
+      const initialCard = deck.splice(0, 1)[0] || { id: 'init', color: CardColor.RED, type: CardType.NUMBER, value: 7 };
+      
+      return { 
+        ...prev, 
+        players, 
+        deck, 
+        discardPile: [initialCard], 
+        status: GameStatus.PLAYING, 
+        currentColor: initialCard.color === CardColor.WILD ? CardColor.RED : initialCard.color, 
+        turnStartTime: Date.now() 
+      };
     });
   };
 
@@ -279,8 +305,6 @@ const App: React.FC = () => {
   };
 
   const joinRoom = (roomId: string) => {
-    // IMPORTANTE: Criamos um estado parcial para forçar o useEffect a se inscrever no canal da sala
-    // sem isso, o roomChannel ficaria null e o broadcast do host nunca chegaria.
     setGameState({ 
         id: roomId, 
         players: [], 
