@@ -48,7 +48,7 @@ const App: React.FC = () => {
       setLocalPlayerId(savedId);
       const remote = await fetchProfile(savedId);
       if (remote) setPlayerProfile(remote);
-      if (playerProfile.name) setCurrentView(AppView.PROFILE);
+      if (playerProfile.name || remote?.name) setCurrentView(AppView.PROFILE);
       setIsLoading(false);
 
       // Simulação para popular lista online (no real seria via Supabase Presence)
@@ -70,6 +70,27 @@ const App: React.FC = () => {
       syncProfile(localPlayerId, playerProfile);
     }
   }, [playerProfile, localPlayerId]);
+
+  // Fix for handleEphemeralReaction: Added missing function to manage reactions state
+  const handleEphemeralReaction = (playerId: string, reaction?: string, voicePhrase?: string) => {
+    const timestamp = Date.now();
+    setReactions(prev => ({
+      ...prev,
+      [playerId]: { playerId, reaction, voicePhrase, timestamp }
+    }));
+    // Auto-remove reaction after 3 seconds to keep UI clean
+    setTimeout(() => {
+      setReactions(prev => {
+        const current = prev[playerId];
+        if (current && current.timestamp === timestamp) {
+          const next = { ...prev };
+          delete next[playerId];
+          return next;
+        }
+        return prev;
+      });
+    }, 3000);
+  };
 
   const triggerHype = (event: string, isBigExplosion: boolean = false) => {
     const pool = NARRATION_PHRASES[event];
@@ -101,7 +122,7 @@ const App: React.FC = () => {
         highestMMR: Math.max(prev.stats.highestMMR || 0, newMMR)
       };
 
-      const updated = { ...prev, mmr: newMMR, coins: newCoins, stats: newStats };
+      const updated = { ...prev, mmr: newMMR, coins: newCoins, stats: newStats, rank: getRankFromMMR(newMMR) };
       if (localPlayerId) syncProfile(localPlayerId, updated);
       return updated;
     });
@@ -203,6 +224,7 @@ const App: React.FC = () => {
       const drawn = deck.splice(0, count);
       const updatedPlayers = [...prev.players];
       updatedPlayers[playerIndex] = { ...player, hand: [...player.hand, ...drawn], hasCalledUno: false };
+      
       const nextIdx = getNextPlayerIndex(prev.currentPlayerIndex, prev.direction, prev.players.length);
       const newState: GameState = {
         ...prev,
@@ -218,163 +240,167 @@ const App: React.FC = () => {
     });
   };
 
-  const handleEphemeralReaction = (playerId: string, reaction?: string, voicePhrase?: string) => {
-    if (voicePhrase === "UNO!") triggerHype('UNO_CALL');
-    setReactions(prev => ({ ...prev, [playerId]: { playerId, reaction, voicePhrase, timestamp: Date.now() } }));
-    setTimeout(() => {
-      setReactions(prev => {
-        const next = { ...prev };
-        delete next[playerId];
-        return next;
-      });
-    }, 4000);
-  };
-
-  const createRoom = async (settings: GameSettings, invitedPlayer?: OnlinePresence) => {
-    setMatchmakingError(null);
-    if (settings.mode === GameMode.RANKED) {
-      setIsMatchmaking(true);
-      
-      // Validação rigorosa: Ranked exige pelo menos 2 humanos
-      // No simulador, filtramos quem não é 'sim-'
-      const realHumans = (Object.values(onlinePlayers) as OnlinePresence[]).filter(p => !p.id.startsWith('sim-') && p.id !== localPlayerId);
-      const humanOpponent = invitedPlayer || realHumans[0];
-      
-      matchmakingTimeoutRef.current = setTimeout(() => {
-        if (!humanOpponent) {
-          setMatchmakingError("A ARENA RANKED ESTÁ VAZIA. É NECESSÁRIO PELO MENOS OUTRO JOGADOR HUMANO ONLINE.");
-          setIsMatchmaking(false);
-          return;
-        }
-        finalizeRoomCreation(settings, humanOpponent);
-      }, 3000);
-    } else {
-      finalizeRoomCreation(settings, invitedPlayer);
-    }
-  };
-
-  const finalizeRoomCreation = (settings: GameSettings, invitedPlayer?: OnlinePresence) => {
-    const deck = generateDeck();
-    const host: Player = { ...playerProfile, id: localPlayerId!, hand: [], isHost: true, isBot: false, score: 0, hasCalledUno: false, rank: getRankFromMMR(playerProfile.mmr) };
-    const players: Player[] = [host];
-    
-    if (invitedPlayer) {
-      players.push({ 
-        ...invitedPlayer, hand: [], isHost: false, isBot: invitedPlayer.id.startsWith('sim-'), score: 0, level: 1, xp: 0, mmr: 1000, coins: 0, inventory: [], equippedSkin: 'default', equippedTable: 'default', equippedBadge: 'default', equippedEffect: 'none', equippedAvatarSkin: 'default', equippedFrame: 'default', stats: {wins:0,losses:0,totalGames:0,totalCardsPlayed:0,unosCalled:0,highestMMR:1000}, achievements: [], hasCalledUno: false 
-      } as any);
-    }
-
-    const countToAdd = settings.mode === GameMode.RANKED ? 0 : (settings.botCount - (invitedPlayer ? 1 : 0));
-    
-    for (let i = 0; i < Math.max(0, countToAdd); i++) {
-      players.push({ 
-        id: `opponent-${i}-${Math.random()}`, name: `Bot ${i+1}`, avatar: AVATARS[Math.floor(Math.random() * AVATARS.length)], hand: [], isHost: false, isBot: true, score: 0, level: 1, xp: 0, mmr: 1000, coins: 0, rank: 'Bronze III', inventory: [], equippedSkin: 'default', equippedTable: 'default', equippedBadge: 'default', equippedEffect: 'none', equippedAvatarSkin: 'default', equippedFrame: 'default', stats: {wins:0,losses:0,totalGames:0,totalCardsPlayed:0,unosCalled:0,highestMMR:1000}, achievements: [], hasCalledUno: false 
-      });
-    }
-
-    const state: GameState = { 
-      id: Math.random().toString(36).substring(7), players, status: GameStatus.LOBBY, deck, discardPile: [], currentPlayerIndex: 0, direction: 1, currentColor: CardColor.RED, winner: null, settings, turnStartTime: Date.now(), pendingDrawCount: 0 
-    };
-    
-    setGameState(state);
-    gameStateRef.current = state;
-    setIsMatchmaking(false);
-    setCurrentView(AppView.GAME);
-  };
-
-  const startGame = () => {
+  const handleCallUno = (playerId: string) => {
     setGameState(prev => {
-      if (!prev) return null;
-      const deck = [...prev.deck];
-      const players = prev.players.map(p => ({ ...p, hand: deck.splice(0, prev.settings.initialCardsCount) }));
-      let first = deck.pop()!;
-      while (first.type === CardType.WILD || first.type === CardType.WILD_DRAW_FOUR) {
-        deck.unshift(first);
-        first = deck.pop()!;
-      }
-      const state = { ...prev, players, deck, discardPile: [first], status: GameStatus.PLAYING, currentColor: first.color, turnStartTime: Date.now() };
-      gameStateRef.current = state;
-      audio.startMusic(); 
-      return state;
+      if (!prev) return prev;
+      const playerIdx = prev.players.findIndex(p => p.id === playerId);
+      const updated = [...prev.players];
+      updated[playerIdx] = { ...updated[playerIdx], hasCalledUno: true };
+      audio.play('uno_shout');
+      triggerHype('UNO_CALL');
+      const newState = { ...prev, players: updated };
+      gameStateRef.current = newState;
+      return newState;
     });
   };
 
-  useEffect(() => {
-    if (gameState?.status === GameStatus.PLAYING) {
-      const p = gameState.players[gameState.currentPlayerIndex];
-      if (p?.isBot) {
-        const t = setTimeout(() => {
-          const card = p.hand.find(c => isMoveValid(c, gameState, p.hand));
-          if (card) {
-            const color = card.color === CardColor.WILD ? [CardColor.RED, CardColor.BLUE, CardColor.GREEN, CardColor.YELLOW][Math.floor(Math.random()*4)] : undefined;
-            handlePlayCard(p.id, [card.id], color, p.hand.length === 2);
-          } else {
-            handleDrawCard(p.id);
-          }
-        }, 1500);
-        return () => clearTimeout(t);
+  const handleSendReaction = (playerId: string, reaction: string) => {
+    handleEphemeralReaction(playerId, reaction);
+  };
+
+  const handleSendVoice = (playerId: string, phrase: string) => {
+    handleEphemeralReaction(playerId, undefined, phrase);
+  };
+
+  const handleTimeout = (playerId: string) => {
+    handleDrawCard(playerId);
+  };
+
+  const handleStartGame = () => {
+    setGameState(prev => {
+      if (!prev) return prev;
+      const newState = { ...prev, status: GameStatus.PLAYING, turnStartTime: Date.now() };
+      gameStateRef.current = newState;
+      return newState;
+    });
+    audio.play('click');
+    audio.startMusic();
+  };
+
+  const handleLeaveRoom = () => {
+    setGameState(null);
+    setCurrentView(AppView.PROFILE);
+    audio.stopMusic();
+  };
+
+  const handleCreateRoom = (settings: GameSettings, invitedPlayer?: OnlinePresence) => {
+    const deck = generateDeck();
+    const players: Player[] = [{
+      ...playerProfile,
+      id: localPlayerId!,
+      isHost: true,
+      isBot: false,
+      hand: deck.splice(0, settings.initialCardsCount),
+      score: 0,
+      hasCalledUno: false,
+      rank: getRankFromMMR(playerProfile.mmr || 1000)
+    }];
+
+    if (settings.mode === GameMode.NORMAL) {
+      for (let i = 0; i < settings.botCount; i++) {
+        players.push({
+          id: `bot-${i}`,
+          name: `Bot ${i + 1}`,
+          avatar: AVATARS[i % AVATARS.length],
+          hand: deck.splice(0, settings.initialCardsCount),
+          isHost: false,
+          isBot: true,
+          score: 0,
+          level: 1,
+          xp: 0,
+          mmr: 1000,
+          coins: 0,
+          rank: 'Bronze III',
+          inventory: [],
+          equippedSkin: 'default',
+          equippedTable: 'default',
+          equippedBadge: 'default',
+          equippedEffect: 'none',
+          equippedAvatarSkin: 'default',
+          equippedFrame: 'default',
+          stats: { wins: 0, losses: 0, totalGames: 0, totalCardsPlayed: 0, unosCalled: 0, highestMMR: 1000 },
+          achievements: [],
+          hasCalledUno: false
+        });
       }
     }
-  }, [gameState?.currentPlayerIndex, gameState?.status]);
 
-  if (isLoading) return (
-    <div className="h-screen w-screen bg-black flex flex-col items-center justify-center font-brand text-yellow-500">
-      <div className="w-20 h-20 border-t-4 border-yellow-500 rounded-full animate-spin"></div>
-    </div>
-  );
+    const firstCard = deck.shift()!;
+    const initialState: GameState = {
+      id: Math.random().toString(36).substring(7),
+      players,
+      status: GameStatus.LOBBY,
+      deck,
+      discardPile: [firstCard],
+      currentPlayerIndex: 0,
+      direction: 1,
+      currentColor: firstCard.color === CardColor.WILD ? CardColor.RED : firstCard.color,
+      winner: null,
+      settings,
+      turnStartTime: Date.now(),
+      pendingDrawCount: 0
+    };
+    setGameState(initialState);
+    gameStateRef.current = initialState;
+    setCurrentView(AppView.GAME);
+  };
 
-  if (isMatchmaking) return (
-    <div className="h-screen w-screen bg-black flex flex-col items-center justify-center font-brand p-6">
-      {!matchmakingError ? (
-        <>
-          <div className="relative w-44 h-44 mb-10">
-            <div className="absolute inset-0 border-4 border-yellow-500/20 rounded-full"></div>
-            <div className="absolute inset-0 border-t-4 border-yellow-500 rounded-full animate-spin"></div>
-            <div className="absolute inset-0 flex items-center justify-center text-5xl animate-pulse">⚔️</div>
-          </div>
-          <h2 className="text-3xl text-yellow-500 italic mb-2 uppercase">Escaneando Arena</h2>
-          <p className="text-white/40 text-[10px] uppercase tracking-[0.3em] mb-12">Buscando oponentes humanos reais...</p>
-        </>
-      ) : (
-        <div className="text-center animate-scale-in">
-           <div className="text-7xl mb-6">🚫</div>
-           <h2 className="text-2xl text-red-500 font-brand italic mb-4 uppercase">Matchmaking Falhou</h2>
-           <p className="text-white/60 text-xs uppercase leading-loose mb-10 px-6 max-w-sm mx-auto">{matchmakingError}</p>
-        </div>
-      )}
-      <button onClick={() => { setIsMatchmaking(false); setMatchmakingError(null); }} className="px-12 py-5 bg-white/5 border border-white/10 rounded-2xl text-white/60 font-brand text-sm hover:bg-red-600/20 hover:text-red-500 transition-all active:scale-95">RETORNAR</button>
-    </div>
-  );
+  if (isLoading) return <div className="h-screen bg-black flex items-center justify-center font-brand text-yellow-400">LOADING ARENA...</div>;
 
   return (
-    <div className={`h-screen w-screen overflow-hidden bg-black text-white select-none ${isExploding ? 'shake-active flash-active' : ''}`}>
-      {isExploding && <div className="plus4-shockwave"></div>}
-      {hypeText && (
-        <div className="fixed inset-0 z-[5000] flex items-center justify-center pointer-events-none p-4 overflow-hidden">
-           <div className={`animate-scale-in text-center transform ${isExploding ? 'scale-150' : 'scale-125'}`}>
-              <h2 className="text-6xl lg:text-[10rem] font-brand italic text-transparent bg-clip-text bg-gradient-to-b from-yellow-200 via-yellow-400 to-orange-600 drop-shadow-[0_0_60px_rgba(234,179,8,1)] uppercase tracking-tighter leading-none -rotate-2 animate-pulse">
-                {hypeText}
-              </h2>
-           </div>
-        </div>
-      )}
-      {currentView === AppView.LOGIN && <Login onLogin={(n, a) => { setPlayerProfile({...playerProfile, name: n, avatar: a}); setCurrentView(AppView.PROFILE); }} />}
-      {currentView === AppView.PROFILE && <Profile profile={{...playerProfile, rank: getRankFromMMR(playerProfile.mmr)}} onNavigate={setCurrentView} onUpdateProfile={(u) => setPlayerProfile({...playerProfile, ...u})} missions={[]} />}
-      {currentView === AppView.LOBBY && <Lobby onBack={() => setCurrentView(AppView.PROFILE)} onCreateRoom={createRoom} onJoinRoom={(id) => setCurrentView(AppView.GAME)} onlinePlayers={Object.values(onlinePlayers)} />}
-      {currentView === AppView.RANKING && <Ranking onBack={() => setCurrentView(AppView.PROFILE)} currentMMR={playerProfile.mmr} />}
-      {currentView === AppView.STORE && <Store profile={playerProfile} onUpdate={(u) => setPlayerProfile({...playerProfile, ...u})} onClose={() => setCurrentView(AppView.PROFILE)} />}
-      {currentView === AppView.INTEL && <IntelHub onBack={() => setCurrentView(AppView.PROFILE)} />}
+    <div className="h-screen w-screen bg-black text-white overflow-hidden flex flex-col">
+      {currentView === AppView.LOGIN && <Login onLogin={(name, avatar) => {
+        setPlayerProfile({ ...playerProfile, name, avatar });
+        setCurrentView(AppView.PROFILE);
+        audio.play('click');
+      }} />}
+
+      {currentView === AppView.PROFILE && <Profile 
+        profile={playerProfile} 
+        missions={[]} 
+        onNavigate={setCurrentView} 
+        onUpdateProfile={(updates: any) => setPlayerProfile((p: any) => ({ ...p, ...updates }))} 
+      />}
+
+      {currentView === AppView.LOBBY && <Lobby 
+        onBack={() => setCurrentView(AppView.PROFILE)} 
+        onCreateRoom={handleCreateRoom} 
+        onJoinRoom={() => {}} 
+        onlinePlayers={Object.values(onlinePlayers)} 
+      />}
+
       {currentView === AppView.GAME && gameState && (
         <GameTable 
-          gameState={gameState} localPlayerId={localPlayerId!} reactions={reactions} equippedSkin={playerProfile.equippedSkin}
-          onPlayCard={handlePlayCard} onDrawCard={handleDrawCard} onTimeout={handleDrawCard} onStartGame={startGame}
-          onCallUno={(pid) => handleEphemeralReaction(pid, undefined, "UNO!")}
-          onSendReaction={handleEphemeralReaction} onSendReactionInternal={handleEphemeralReaction} onSendVoice={(pid, v) => handleEphemeralReaction(pid, undefined, v)}
-          onLeaveRoom={() => { setGameState(null); setCurrentView(AppView.PROFILE); audio.stopMusic(); }}
+          gameState={gameState}
+          localPlayerId={localPlayerId!}
+          equippedSkin={playerProfile.equippedSkin}
+          reactions={reactions}
+          onPlayCard={handlePlayCard}
+          onDrawCard={handleDrawCard}
+          onCallUno={handleCallUno}
+          onSendReaction={handleSendReaction}
+          onTimeout={handleTimeout}
+          onSendVoice={handleSendVoice}
+          onStartGame={handleStartGame}
+          onLeaveRoom={handleLeaveRoom}
           onlinePlayers={Object.values(onlinePlayers)}
         />
       )}
-      {gameState?.status === GameStatus.FINISHED && <GameOver winner={gameState.winner!} mode={gameState.settings.mode} onRestart={() => { setGameState(null); setCurrentView(AppView.PROFILE); }} />}
+
+      {currentView === AppView.RANKING && <Ranking onBack={() => setCurrentView(AppView.PROFILE)} currentMMR={playerProfile.mmr} />}
+      {currentView === AppView.STORE && <Store profile={playerProfile} onUpdate={(u: any) => setPlayerProfile((p: any) => ({ ...p, ...u }))} onClose={() => setCurrentView(AppView.PROFILE)} />}
+      
+      {gameState?.status === GameStatus.FINISHED && gameState.winner && (
+        <GameOver winner={gameState.winner} mode={gameState.settings.mode} onRestart={handleLeaveRoom} />
+      )}
+
+      {hypeText && (
+        <div className={`fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[1000] pointer-events-none transition-all duration-500 ${isExploding ? 'scale-150' : 'scale-100'}`}>
+          <div className="bg-yellow-500 text-black px-12 py-6 rounded-full font-brand text-4xl italic shadow-[0_0_100px_rgba(234,179,8,0.8)] border-4 border-white animate-bounce text-center max-w-lg">
+            {hypeText}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
