@@ -27,7 +27,8 @@ export enum AppView {
   RANKING = 'ranking',
   STORE = 'store',
   LOBBY = 'lobby',
-  GAME = 'game'
+  GAME = 'game',
+  INTEL = 'intel'
 }
 
 export interface Card {
@@ -45,6 +46,15 @@ export interface Achievement {
   unlocked: boolean;
 }
 
+export interface DailyMission {
+  id: string;
+  description: string;
+  target: number;
+  current: number;
+  reward: number;
+  completed: boolean;
+}
+
 export interface PlayerStats {
   wins: number;
   losses: number;
@@ -58,6 +68,7 @@ export interface Player {
   id: string;
   name: string;
   avatar: string;
+  photoUrl?: string | null;
   hand: Card[];
   isHost: boolean;
   isBot: boolean;
@@ -69,6 +80,11 @@ export interface Player {
   rank: string;
   inventory: string[];
   equippedSkin: string;
+  equippedTable: string;
+  equippedBadge: string;
+  equippedEffect: string;
+  equippedAvatarSkin: string;
+  equippedFrame: string;
   stats: PlayerStats;
   achievements: Achievement[];
   hasCalledUno: boolean;
@@ -118,12 +134,13 @@ export interface OnlinePresence {
   id: string;
   name: string;
   avatar: string;
+  photoUrl?: string | null;
   rank: string;
   lastSeen: number;
   currentRoomId?: string;
 }
 
-export type StoreCategory = 'card_skin' | 'table_bg' | 'visual_effect' | 'badge';
+export type StoreCategory = 'card_skin' | 'table_bg' | 'visual_effect' | 'badge' | 'avatar_skin';
 
 export interface StoreItem {
   id: string;

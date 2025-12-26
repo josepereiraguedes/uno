@@ -10,47 +10,59 @@ interface GameOverProps {
 
 const GameOver: React.FC<GameOverProps> = ({ winner, mode, onRestart }) => {
   return (
-    <div className="fixed inset-0 bg-emerald-950/98 z-[200] flex flex-col items-center justify-center p-6 text-center animate-fade-in">
-      <div className="space-y-8 animate-slide-up max-w-xl w-full">
-        <div className="relative">
-           <div className="w-48 h-48 lg:w-64 lg:h-64 rounded-full bg-yellow-400 mx-auto border-8 border-white shadow-[0_0_80px_rgba(250,204,21,0.5)] flex items-center justify-center text-7xl lg:text-9xl animate-bounce">
-             🏆
-           </div>
-           <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 bg-white text-emerald-950 px-12 py-4 rounded-full font-brand text-3xl shadow-2xl border-4 border-emerald-900 rotate-[-2deg]">
-             VENCEDOR
-           </div>
+    <div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 overflow-hidden animate-fade-in">
+      <div className="absolute inset-0 bg-black/95 backdrop-blur-xl">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(234,179,8,0.2)_0%,transparent_70%)]"></div>
+        {/* Confetes CSS */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none opacity-40">
+          {[...Array(15)].map((_, i) => (
+            <div 
+              key={i} 
+              className="absolute w-2 h-2 bg-yellow-400 rounded-sm animate-bounce"
+              style={{
+                left: `${Math.random() * 100}%`,
+                top: `-10px`,
+                animationDelay: `${Math.random() * 2}s`,
+                animationDuration: `${2 + Math.random() * 2}s`
+              }}
+            ></div>
+          ))}
+        </div>
+      </div>
+
+      <div className="relative w-full max-w-lg bg-white/5 border border-white/10 rounded-[3rem] p-8 sm:p-12 flex flex-col items-center text-center shadow-[0_0_100px_rgba(0,0,0,1)] animate-scale-in">
+        <h2 className="text-blue-400 font-black tracking-[0.4em] text-[10px] uppercase mb-2">Combate Encerrado</h2>
+        <h1 className="text-6xl sm:text-8xl font-brand text-transparent bg-clip-text bg-gradient-to-b from-yellow-200 to-yellow-600 italic mb-8 drop-shadow-2xl">VITÓRIA!</h1>
+
+        <div className="relative mb-8">
+          <div className="absolute inset-0 bg-yellow-500/20 blur-[50px] rounded-full animate-pulse"></div>
+          <div className="relative w-32 h-32 sm:w-44 sm:h-44 rounded-full border-4 sm:border-8 border-yellow-500 p-1 bg-black shadow-2xl flex items-center justify-center overflow-hidden">
+            <div className="w-full h-full rounded-full bg-zinc-900 flex items-center justify-center text-6xl sm:text-8xl">
+              {winner.photoUrl ? <img src={winner.photoUrl} className="w-full h-full object-cover" /> : winner.avatar}
+            </div>
+          </div>
+          <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-yellow-500 text-black px-4 py-1 rounded-full font-brand text-sm shadow-xl whitespace-nowrap">CAMPEÃO</div>
         </div>
 
-        <div className="space-y-4 pt-6">
-           <h1 className="text-6xl lg:text-8xl font-brand text-yellow-400 tracking-tighter drop-shadow-2xl uppercase italic">
-             {winner.name}
-           </h1>
-           <p className="text-white/40 text-xs font-black uppercase tracking-[0.5em] mb-10">Lenda Consagrada na Arena</p>
-           
-           <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 mt-8">
-              <div className="bg-black/60 p-6 rounded-[2rem] border border-yellow-500/30">
-                 <span className="block text-[8px] lg:text-[10px] text-white/40 font-black uppercase tracking-widest mb-1">Moedas Ganhas</span>
-                 <span className="text-3xl lg:text-4xl font-brand text-yellow-400">🪙 {winner.score || 50}</span>
-              </div>
-              <div className="bg-black/60 p-6 rounded-[2rem] border border-blue-500/30">
-                 <span className="block text-[8px] lg:text-[10px] text-white/40 font-black uppercase tracking-widest mb-1">Rank Atual</span>
-                 <span className="text-3xl lg:text-4xl font-brand text-blue-400">{winner.rank}</span>
-              </div>
-              <div className="bg-black/60 p-6 rounded-[2rem] border border-emerald-500/30 col-span-2 lg:col-span-1">
-                 <span className="block text-[8px] lg:text-[10px] text-white/40 font-black uppercase tracking-widest mb-1">MMR Ganhos</span>
-                 <span className="text-3xl lg:text-4xl font-brand text-emerald-400">+25</span>
-              </div>
-           </div>
+        <h3 className="text-3xl sm:text-5xl font-brand text-white italic mb-10 truncate max-w-full px-4">{winner.name}</h3>
+
+        <div className="grid grid-cols-2 gap-3 w-full mb-10">
+          <div className="bg-white/5 p-4 rounded-2xl border border-white/10">
+            <span className="block text-[8px] text-white/30 font-black uppercase tracking-widest mb-1">Recompensa</span>
+            <span className="text-xl font-brand text-yellow-400 italic">🪙 {winner.score || 50}</span>
+          </div>
+          <div className="bg-white/5 p-4 rounded-2xl border border-white/10">
+            <span className="block text-[8px] text-white/30 font-black uppercase tracking-widest mb-1">Arena MMR</span>
+            <span className="text-xl font-brand text-emerald-400 italic">+25</span>
+          </div>
         </div>
 
-        <div className="pt-12">
-           <button 
-             onClick={onRestart}
-             className="px-16 lg:px-24 py-6 lg:py-8 bg-yellow-500 hover:bg-yellow-400 text-emerald-950 font-brand text-3xl lg:text-5xl rounded-[2.5rem] shadow-[0_12px_0_#a16207] transition-all active:translate-y-2 active:shadow-none hover:scale-105"
-           >
-             NOVA ARENA
-           </button>
-        </div>
+        <button 
+          onClick={onRestart}
+          className="w-full py-5 bg-yellow-500 text-black font-brand text-2xl rounded-2xl transition-all active:scale-95 shadow-2xl"
+        >
+          CONTINUAR
+        </button>
       </div>
     </div>
   );

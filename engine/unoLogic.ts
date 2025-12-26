@@ -23,17 +23,18 @@ export const getRankFromMMR = (mmr: number): string => {
   return rank ? rank.name : 'Iniciante';
 };
 
-export const calculateMMRGain = (isWinner: boolean, state: GameState): number => {
-  if (state.settings.mode !== GameMode.RANKED) return 0;
-  return isWinner ? 25 : -20;
-};
-
-export const isMoveValid = (card: Card, gameState: GameState): boolean => {
+/**
+ * Validação de Coerência Estrita
+ */
+export const isMoveValid = (card: Card, gameState: GameState, playerHand: Card[]): boolean => {
+  if (!card || !gameState) return false;
+  
   const topDiscard = gameState.discardPile[gameState.discardPile.length - 1];
-  const currentColor = gameState.currentColor;
-  const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+  if (!topDiscard) return true;
 
-  // Acúmulo de +2/+4
+  const currentColor = gameState.currentColor;
+
+  // 1. REGRA DE ACÚMULO (STACKING)
   if (gameState.pendingDrawCount > 0 && gameState.settings.stackingEnabled) {
     if (topDiscard.type === CardType.DRAW_TWO) {
       return card.type === CardType.DRAW_TWO || card.type === CardType.WILD_DRAW_FOUR;
@@ -44,19 +45,29 @@ export const isMoveValid = (card: Card, gameState: GameState): boolean => {
     return false;
   }
 
-  // Coringa +4 restrição
+  // 2. CORINGAS
+  if (card.type === CardType.WILD) return true;
+
   if (card.type === CardType.WILD_DRAW_FOUR) {
-    const hasCurrentColor = currentPlayer.hand.some(c => c.color === currentColor && c.color !== CardColor.WILD);
+    // Só pode se não tiver a cor atual na mão
+    const hasCurrentColor = playerHand.some(c => 
+      c.color === currentColor && 
+      c.type !== CardType.WILD && 
+      c.type !== CardType.WILD_DRAW_FOUR
+    );
     return !hasCurrentColor;
   }
 
-  if (card.type === CardType.WILD) return true;
-
-  // Validação por Cor ou Número/Tipo (Regra Base)
+  // 3. COERÊNCIA DE COR (Sempre válido se a cor bater)
   if (card.color === currentColor) return true;
+
+  // 4. COERÊNCIA DE VALOR/TIPO (Só se a cor for diferente)
+  // Para números: Valor deve ser igual
   if (card.type === CardType.NUMBER && topDiscard.type === CardType.NUMBER) {
     return card.value === topDiscard.value;
   }
+
+  // Para ações: Tipo deve ser igual (Skip com Skip, Reverse com Reverse, etc)
   if (card.type !== CardType.NUMBER && card.type === topDiscard.type) {
     return true;
   }
@@ -76,20 +87,17 @@ export const applyCardEffect = (card: Card, state: GameState): { direction: 1 | 
   let skipNext = false;
   let drawCount = 0;
 
+  if (!card) return { direction, skipNext, drawCount };
+
   switch (card.type) {
-    case CardType.SKIP:
-      skipNext = true;
-      break;
+    case CardType.SKIP: skipNext = true; break;
     case CardType.REVERSE:
-      if (state.players.length === 2) {
-        skipNext = true;
-      } else {
-        direction = (direction === 1 ? -1 : 1);
-      }
+      if (state.players.length === 2) skipNext = true;
+      else direction = (direction === 1 ? -1 : 1);
       break;
     case CardType.DRAW_TWO:
       drawCount = 2;
-      skipNext = true;
+      skipNext = true; 
       break;
     case CardType.WILD_DRAW_FOUR:
       drawCount = 4;

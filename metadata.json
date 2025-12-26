@@ -1,8 +1,13 @@
 {
-  "name": "UNO Online Multiplayer",
-  "description": "A full-featured digital UNO game with private rooms, custom rules, and real-time multiplayer logic.",
+  "name": "UNO Battle Arena Mobile",
+  "description": "Arena competitiva de UNO com sincronização em tempo real e modo offline-first.",
   "requestFramePermissions": [
     "camera",
     "microphone"
+  ],
+  "mobileFeatures": [
+    "push_notifications",
+    "haptic_feedback",
+    "background_sync"
   ]
 }

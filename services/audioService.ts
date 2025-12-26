@@ -3,32 +3,49 @@ class AudioService {
   private static instance: AudioService;
   private bgm: HTMLAudioElement | null = null;
   private isMuted: boolean = false;
-  private volume: number = 0.4;
+  private volume: number = 0.5;
   private currentTrackIndex: number = 0;
-  private synth: SpeechSynthesis = window.speechSynthesis;
 
   private tracks = [
-    'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
-    'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
-    'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3'
+    'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3',
+    'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-15.mp3',
+    'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3'
   ];
 
-  private sounds: Record<string, HTMLAudioElement> = {
-    card_play: new Audio('https://assets.mixkit.co/active_storage/sfx/2013/2013-preview.mp3'),
-    card_draw: new Audio('https://assets.mixkit.co/active_storage/sfx/2007/2007-preview.mp3'),
-    uno_shout: new Audio('https://assets.mixkit.co/active_storage/sfx/2017/2017-preview.mp3'),
-    win_fanfare: new Audio('https://assets.mixkit.co/active_storage/sfx/1435/1435-preview.mp3'),
-    lose: new Audio('https://assets.mixkit.co/active_storage/sfx/2502/2502-preview.mp3'),
-    click: new Audio('https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3'),
-    penalty: new Audio('https://assets.mixkit.co/active_storage/sfx/2510/2510-preview.mp3'),
-    tick: new Audio('https://assets.mixkit.co/active_storage/sfx/2550/2550-preview.mp3'),
-    voice_skip: new Audio('https://assets.mixkit.co/active_storage/sfx/2004/2004-preview.mp3'),
-    voice_wild: new Audio('https://assets.mixkit.co/active_storage/sfx/2001/2001-preview.mp3')
-  };
+  private sounds: Record<string, HTMLAudioElement> = {};
 
   private constructor() {
-    this.bgm = new Audio(this.tracks[0]);
+    this.initSfx();
+    this.initBgm();
+  }
+
+  private initSfx() {
+    const sfxUrls: Record<string, string> = {
+      card_play: 'https://assets.mixkit.co/active_storage/sfx/2013/2013-preview.mp3',
+      card_draw: 'https://assets.mixkit.co/active_storage/sfx/2007/2007-preview.mp3',
+      uno_shout: 'https://assets.mixkit.co/active_storage/sfx/2017/2017-preview.mp3',
+      win_fanfare: 'https://assets.mixkit.co/active_storage/sfx/1435/1435-preview.mp3',
+      click: 'https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3',
+      penalty: 'https://assets.mixkit.co/active_storage/sfx/2510/2510-preview.mp3',
+      hype: 'https://assets.mixkit.co/active_storage/sfx/2019/2019-preview.mp3'
+    };
+
+    Object.entries(sfxUrls).forEach(([key, url]) => {
+      const audio = new Audio(url);
+      audio.preload = 'auto';
+      this.sounds[key] = audio;
+    });
+  }
+
+  private initBgm() {
+    if (this.bgm) {
+      this.bgm.pause();
+      this.bgm.src = '';
+    }
+    this.bgm = new Audio();
     this.bgm.loop = true;
+    this.bgm.preload = 'auto';
+    this.bgm.src = this.tracks[this.currentTrackIndex];
     this.updateVolumes();
   }
 
@@ -38,41 +55,38 @@ class AudioService {
   }
 
   private updateVolumes() {
-    if (this.bgm) this.bgm.volume = this.isMuted ? 0 : this.volume * 0.4;
+    if (this.bgm) this.bgm.volume = this.isMuted ? 0 : this.volume * 0.2;
     Object.values(this.sounds).forEach(s => s.volume = this.isMuted ? 0 : this.volume);
   }
 
   public startMusic() {
-    if (this.isMuted) return;
-    this.bgm?.play().catch(() => console.log("Interação necessária"));
+    if (!this.bgm || this.isMuted) return;
+    this.bgm.play().catch(() => {});
+  }
+
+  public stopMusic() {
+    if (this.bgm) {
+      this.bgm.pause();
+      this.bgm.currentTime = 0;
+    }
   }
 
   public setVolume(val: number) {
-    this.volume = val;
+    this.volume = Math.max(0, Math.min(1, val));
     this.updateVolumes();
   }
 
   public getVolume() { return this.volume; }
 
   public nextTrack() {
+    if (!this.bgm) return;
+    const wasPlaying = !this.bgm.paused;
     this.currentTrackIndex = (this.currentTrackIndex + 1) % this.tracks.length;
-    const wasPlaying = !this.bgm?.paused;
-    if (this.bgm) {
-      this.bgm.src = this.tracks[this.currentTrackIndex];
-      if (wasPlaying && !this.isMuted) this.bgm.play();
-    }
+    this.bgm.src = this.tracks[this.currentTrackIndex];
+    if (wasPlaying && !this.isMuted) this.bgm.play().catch(() => {});
   }
 
-  public speak(text: string) {
-    if (this.isMuted || !text) return;
-    this.synth.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'pt-BR';
-    utterance.rate = 1.1;
-    this.synth.speak(utterance);
-  }
-
-  public play(sound: keyof typeof this.sounds) {
+  public play(sound: string) {
     const sfx = this.sounds[sound];
     if (sfx) {
       sfx.currentTime = 0;
@@ -82,12 +96,8 @@ class AudioService {
 
   public toggleMute(): boolean {
     this.isMuted = !this.isMuted;
-    if (this.isMuted) {
-      this.bgm?.pause();
-      this.synth.cancel();
-    } else {
-      this.bgm?.play();
-    }
+    if (this.isMuted) this.bgm?.pause();
+    else this.bgm?.play().catch(() => {});
     this.updateVolumes();
     return this.isMuted;
   }

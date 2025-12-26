@@ -1,10 +1,10 @@
 
-import React, { useState, useEffect, useRef } from 'react';
-import { GameState, CardColor, CardType, GameStatus, Player, OnlinePresence, GameMode, EphemeralReaction } from '../types';
-import UnoCard from './UnoCard';
-import { isMoveValid } from '../engine/unoLogic';
-import { COLOR_CLASSES, VOICE_PHRASES } from '../constants';
-import { audio } from '../services/audioService';
+import React, { useState, useEffect } from 'react';
+import { GameState, CardColor, CardType, GameStatus, Player, OnlinePresence, EphemeralReaction, Card, GameMode } from '../types.ts';
+import UnoCard from './UnoCard.tsx';
+import { isMoveValid } from '../engine/unoLogic.ts';
+import { COLOR_CLASSES, VOICE_PHRASES } from '../constants.ts';
+import { audio } from '../services/audioService.ts';
 
 interface GameTableProps {
   gameState: GameState;
@@ -22,25 +22,60 @@ interface GameTableProps {
   onlinePlayers: OnlinePresence[];
 }
 
-const GameTable: React.FC<GameTableProps> = ({ gameState, localPlayerId, equippedSkin, reactions, onPlayCard, onDrawCard, onCallUno, onSendReaction, onTimeout, onSendVoice, onStartGame, onLeaveRoom, onlinePlayers }) => {
-  // Segurança: Evita crash caso o jogador local ainda não esteja no array (sincronização pendente)
-  const localPlayer = gameState.players.find(p => p.id === localPlayerId);
-  const currentPlayer = gameState.players[gameState.currentPlayerIndex] || gameState.players[0];
-  const isMyTurn = gameState.status === GameStatus.PLAYING && currentPlayer?.id === localPlayerId;
-  
+const PlayerVisual: React.FC<{ p: Player, reaction?: EphemeralReaction, isCurrent: boolean, positionStyle?: React.CSSProperties, isLocal?: boolean }> = ({ p, reaction, isCurrent, positionStyle, isLocal }) => {
+  const skinClass = p.equippedAvatarSkin === 'fire_aura' ? 'animate-pulse bg-gradient-to-br from-red-600 to-orange-400' : 'bg-yellow-400';
+
+  return (
+    <div className={`${positionStyle ? 'player-node' : 'relative'} flex flex-col items-center z-[150]`} style={positionStyle}>
+      <div className={`relative transition-all duration-300 ${isCurrent ? 'scale-110' : 'opacity-90 scale-95'}`}>
+        
+        {reaction && (
+          <div className="absolute -top-24 left-1/2 -translate-x-1/2 z-[500] animate-bounce pointer-events-none">
+            <div className="bg-black border-2 border-yellow-500 rounded-3xl p-3 shadow-[0_0_30px_rgba(234,179,8,0.7)] flex flex-col items-center min-w-[80px]">
+              {reaction.reaction && <span className="text-5xl mb-1 filter drop-shadow-md">{reaction.reaction}</span>}
+              {reaction.voicePhrase && (
+                <span className="text-[8px] font-black uppercase text-yellow-400 whitespace-nowrap bg-zinc-900 px-3 py-1 rounded-full border border-white/20 mt-1">
+                  {reaction.voicePhrase}
+                </span>
+              )}
+              <div className="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0 border-l-[12px] border-l-transparent border-r-[12px] border-r-transparent border-t-[12px] border-t-black"></div>
+            </div>
+          </div>
+        )}
+
+        <div className={`bg-black/60 border-2 rounded-xl overflow-hidden flex flex-col w-14 lg:w-28 shadow-2xl relative ${isCurrent ? 'border-yellow-400 ring-4 ring-yellow-400/30' : 'border-white/20'}`}>
+          <div className={`h-12 lg:h-24 flex items-center justify-center text-3xl lg:text-6xl ${skinClass}`}>
+            {p.photoUrl ? <img src={p.photoUrl} alt={p.name} className="w-full h-full object-cover" /> : p.avatar}
+          </div>
+          {!isLocal && (
+            <div className="bg-black/80 py-0.5 text-center border-t border-white/5">
+              <span className="text-[6px] lg:text-[10px] font-black uppercase text-white/80">{p.name}</span>
+            </div>
+          )}
+        </div>
+        {!isLocal && (
+          <div className="absolute -right-2 -top-2 bg-red-600 text-white font-brand text-[10px] w-6 h-6 rounded-lg border-2 border-white flex items-center justify-center shadow-xl">
+            {p.hand.length}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const GameTable: React.FC<GameTableProps> = ({ gameState, localPlayerId, equippedSkin, reactions, onPlayCard, onDrawCard, onCallUno, onSendReaction, onTimeout, onSendVoice, onStartGame, onLeaveRoom }) => {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [showPicker, setShowPicker] = useState(false);
-  const [showEmojiMenu, setShowEmojiMenu] = useState(false);
-  const [showVoiceMenu, setShowVoiceMenu] = useState(false);
-  const [showAudioSettings, setShowAudioSettings] = useState(false);
+  const [activeMenu, setActiveMenu] = useState<'emoji' | 'voice' | 'audio' | null>(null);
   const [unoDeclared, setUnoDeclared] = useState(false);
   const [timeLeft, setTimeLeft] = useState(gameState.settings.turnTimeLimit);
-  const [vol, setVol] = useState(audio.getVolume());
-  const [copySuccess, setCopySuccess] = useState(false);
   
-  const lastSecondRef = useRef<number>(-1);
+  const [audioVolume, setAudioVolume] = useState(audio.getVolume());
+  const [audioMuted, setAudioMuted] = useState(audio.getMuteStatus());
 
-  const ALL_EMOJIS = ['😂', '😈', '😡', '🃏', '😎', '💩', '👋', '🤫', '🤡', '💀', '🔥', '👑', '🤢', '👽', '👻', '💎'];
+  const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+  const isMyTurn = gameState.status === GameStatus.PLAYING && currentPlayer?.id === localPlayerId;
+  const localPlayer = gameState.players.find(p => p.id === localPlayerId);
 
   useEffect(() => {
     if (gameState.status !== GameStatus.PLAYING) return;
@@ -48,43 +83,18 @@ const GameTable: React.FC<GameTableProps> = ({ gameState, localPlayerId, equippe
       const elapsed = Math.floor((Date.now() - gameState.turnStartTime) / 1000);
       const remaining = Math.max(0, gameState.settings.turnTimeLimit - elapsed);
       setTimeLeft(remaining);
-      if (remaining <= 5 && remaining > 0 && remaining !== lastSecondRef.current) {
-        audio.play('tick');
-        lastSecondRef.current = remaining;
-      }
-      if (remaining === 0 && lastSecondRef.current !== 0) {
-        lastSecondRef.current = 0;
-        onTimeout(currentPlayer.id);
-      }
-    }, 500);
+      if (remaining === 0 && isMyTurn) onTimeout(localPlayerId);
+    }, 1000);
     return () => clearInterval(interval);
-  }, [gameState.turnStartTime, gameState.currentPlayerIndex, gameState.status]);
+  }, [gameState.turnStartTime, gameState.currentPlayerIndex, gameState.status, isMyTurn]);
 
   useEffect(() => {
     setSelectedIds([]);
     setUnoDeclared(false);
-    // REMOVIDO: showEmojiMenu e showVoiceMenu não fecham mais no turno dos outros
-    if (isMyTurn) {
-        audio.play('click');
-        // Se eu abrir o menu e for meu turno, posso fechar se quiser, mas não automaticamente
-    }
-  }, [gameState.currentPlayerIndex]);
+    setShowPicker(false);
+  }, [gameState.currentPlayerIndex, gameState.discardPile.length]);
 
-  // Se o localPlayer for undefined (ex: entrando na sala), mostra loading
-  if (!localPlayer) {
-    return (
-      <div className="flex-1 flex items-center justify-center bg-[#022c22]">
-        <div className="animate-spin rounded-full h-12 w-12 border-4 border-yellow-500 border-t-transparent"></div>
-      </div>
-    );
-  }
-
-  const handleCopyInvite = () => {
-    navigator.clipboard.writeText(gameState.id);
-    setCopySuccess(true);
-    audio.play('click');
-    setTimeout(() => setCopySuccess(false), 2000);
-  };
+  if (!localPlayer) return null;
 
   const handleCardSelect = (id: string) => {
     if (!isMyTurn) return;
@@ -92,206 +102,228 @@ const GameTable: React.FC<GameTableProps> = ({ gameState, localPlayerId, equippe
     if (!card) return;
 
     if (selectedIds.includes(id)) {
-      setSelectedIds(prev => prev.filter(i => i !== id));
+      const updated = selectedIds.filter(i => i !== id);
+      setSelectedIds(updated);
+      if (updated.length === 0) setShowPicker(false);
       return;
     }
-    
-    if (selectedIds.length === 0) {
-      if (isMoveValid(card, gameState)) {
-        if (card.color === CardColor.WILD) setShowPicker(true);
-        setSelectedIds([id]);
-        audio.play('click');
-      }
-    } else if (gameState.settings.mirrorRuleEnabled) {
-      const firstCard = localPlayer.hand.find(c => c.id === selectedIds[0])!;
-      const sameValue = card.type === firstCard.type && (card.type === CardType.NUMBER ? card.value === firstCard.value : true);
-      if (sameValue && card.color !== CardColor.WILD) {
+
+    if (selectedIds.length > 0) {
+      const firstCard = localPlayer.hand.find(c => c.id === selectedIds[0]);
+      if (firstCard && (card.type === firstCard.type && (card.type === CardType.NUMBER ? card.value === firstCard.value : true))) {
         setSelectedIds(prev => [...prev, id]);
         audio.play('click');
+        return;
       }
+    }
+
+    if (isMoveValid(card, gameState, localPlayer.hand)) {
+      setSelectedIds([id]);
+      setShowPicker(card.color === CardColor.WILD);
+      audio.play('click');
     }
   };
 
-  const renderHand = () => {
-    const hand = localPlayer.hand;
-    const screenWidth = window.innerWidth;
-    const maxHandWidth = screenWidth * 0.9;
-    const cardBaseWidth = screenWidth < 768 ? 65 : 100;
-    const totalCards = hand.length;
-    let overlap = screenWidth < 768 ? -40 : -60;
-    if (totalCards * (cardBaseWidth + overlap) > maxHandWidth) overlap = (maxHandWidth / totalCards) - cardBaseWidth;
-    return (
-      <div className="flex justify-center items-end w-full max-w-full overflow-visible px-2 h-full">
-        {hand.map((card, i) => {
-          const isSelected = selectedIds.includes(card.id);
-          const playable = isMyTurn && isMoveValid(card, gameState);
-          return (
-            <div 
-              key={card.id} 
-              onClick={() => handleCardSelect(card.id)} 
-              className={`transition-all duration-200 relative transform-gpu ${isSelected ? '-translate-y-16 lg:-translate-y-28 z-[100] scale-110' : 'hover:-translate-y-8 z-10'}`} 
-              style={{ marginLeft: i === 0 ? 0 : `${overlap}px`, zIndex: i + (isSelected ? 200 : 10) }}
-            >
-              <UnoCard card={card} skin={equippedSkin} size={screenWidth < 768 ? 'sm' : 'md'} playable={playable} disabled={!isMyTurn} />
-            </div>
-          );
-        })}
-      </div>
-    );
-  };
-
-  const PlayerVisual = ({ p, isLocal }: { p: Player, isLocal?: boolean }) => {
-    const reaction = reactions[p.id];
-    const isCurrent = currentPlayer?.id === p.id;
-    return (
-      <div className={`relative flex flex-col items-center transition-all ${isCurrent ? 'scale-110 z-50' : 'opacity-70 z-10'}`}>
-        {reaction?.reaction && <div className="absolute -top-12 left-1/2 -translate-x-1/2 z-[300] animate-reaction text-4xl lg:text-5xl">{reaction.reaction}</div>}
-        {reaction?.voicePhrase && <div className="absolute -top-16 left-1/2 -translate-x-1/2 z-[300] animate-slide-up bg-white text-emerald-900 px-3 py-1.5 rounded-xl text-[8px] lg:text-[10px] font-black uppercase whitespace-nowrap shadow-2xl border-2 border-emerald-500">{reaction.voicePhrase}</div>}
-        <div className="relative mb-1">
-          <div className={`w-10 h-10 lg:w-20 lg:h-20 rounded-full border-4 ${isCurrent ? 'border-yellow-400 shadow-[0_0_20px_rgba(250,204,21,0.6)] animate-pulse' : 'border-white/10'} bg-black/40 flex items-center justify-center text-xl lg:text-4xl`}>{p.avatar}</div>
-          {!isLocal && <div className="absolute -bottom-1 -right-1 bg-blue-600 text-white text-[8px] lg:text-[10px] w-5 h-5 lg:w-7 lg:h-7 rounded-full flex items-center justify-center border-2 border-emerald-950 font-black">{p.hand.length}</div>}
-        </div>
-        <span className="text-[7px] lg:text-[10px] font-black uppercase truncate w-14 lg:w-24 text-center tracking-widest text-white drop-shadow-md">{p.name}</span>
-      </div>
-    );
-  };
+  const otherPlayers = gameState.players.filter(p => p.id !== localPlayerId);
+  const topDiscard = gameState.discardPile[gameState.discardPile.length - 1];
 
   if (gameState.status === GameStatus.LOBBY) {
-    const humans = gameState.players.filter(p => !p.isBot).length;
-    const bots = gameState.players.filter(p => p.isBot).length;
-    const canStart = humans + bots >= 2;
+    const isRanked = gameState.settings.mode === GameMode.RANKED;
     return (
-        <div className="flex-1 flex flex-col lg:flex-row h-full animate-fade-in z-10 overflow-hidden relative">
-          <button onClick={onLeaveRoom} className="absolute top-4 left-4 z-[200] bg-white/5 hover:bg-red-600/20 text-white/40 hover:text-white px-4 py-3 rounded-2xl border border-white/10 transition-all font-black uppercase text-[10px] tracking-widest">🚪 ABANDONAR ARENA</button>
-          
-          <div className="flex-1 flex flex-col items-center justify-center p-6 space-y-8 bg-black/20 text-center">
-            <h1 className="text-5xl lg:text-8xl font-brand text-yellow-400 drop-shadow-2xl italic tracking-tighter">ARENA {gameState.id}</h1>
-            
-            <button 
-              onClick={handleCopyInvite}
-              className={`px-6 py-2 rounded-full font-black text-[10px] tracking-widest uppercase transition-all ${copySuccess ? 'bg-emerald-500 text-white' : 'bg-white/10 text-white/40 hover:bg-white/20'}`}
-            >
-              {copySuccess ? 'CÓDIGO COPIADO! ✓' : 'CONVIDAR AMIGOS 🔗'}
-            </button>
+      <div className="h-full w-full flex flex-col items-center justify-center relative bg-black">
+         <div className="arena-table"><div className="arena-facet"></div></div>
+         
+         <button onClick={onLeaveRoom} className="absolute top-10 left-6 z-[100] text-white/40 uppercase font-black text-[10px] flex items-center gap-2 px-4 py-2 bg-white/5 rounded-full border border-white/10 active:scale-95 transition-all">
+            <span className="text-lg">←</span> VOLTAR
+         </button>
 
-            <div className="flex flex-wrap justify-center gap-3 max-w-2xl px-4 overflow-y-auto no-scrollbar max-h-[40vh]">
-              {gameState.players.map(p => (
-                <div key={p.id} className="bg-black/40 p-3 rounded-[2rem] border border-white/10 flex flex-col items-center gap-2 w-24 lg:w-36 animate-slide-up relative group">
-                  <div className={`w-12 h-12 lg:w-16 lg:h-16 rounded-full bg-black/40 flex items-center justify-center text-2xl lg:text-4xl border-2 transition-all ${p.isHost ? 'border-yellow-500 shadow-lg' : 'border-white/10'}`}>{p.avatar}</div>
-                  <div className="text-center"><p className="font-bold text-[8px] lg:text-xs truncate w-20 lg:w-28 uppercase tracking-widest">{p.name}</p></div>
-                </div>
-              ))}
+         <div className="z-10 text-center space-y-8 p-6">
+            <div className="space-y-2">
+              <h1 className={`text-7xl lg:text-9xl font-brand italic drop-shadow-2xl ${isRanked ? 'text-yellow-500' : 'text-yellow-400'}`}>ARENA UNO</h1>
+              <p className="text-blue-400 font-black tracking-widest text-[10px] uppercase">
+                {isRanked ? 'Sessão Competitiva • Rankeada' : 'Sessão Casual • Treinamento'}
+              </p>
             </div>
-            
+
+            <div className="flex gap-4 justify-center flex-wrap max-w-sm">
+               {gameState.players.map(p => (
+                 <div key={p.id} className={`w-14 h-14 bg-white/5 rounded-2xl border-2 flex items-center justify-center text-2xl shadow-xl animate-scale-in ${p.isHost ? 'border-yellow-500' : 'border-white/10'}`}>
+                    {p.photoUrl ? <img src={p.photoUrl} className="w-full h-full object-cover rounded-xl" alt={p.name} /> : p.avatar}
+                 </div>
+               ))}
+               {[...Array(Math.max(0, 4 - gameState.players.length))].map((_, i) => (
+                 <div key={i} className="w-14 h-14 bg-white/5 rounded-2xl border-2 border-dashed border-white/5 flex items-center justify-center text-white/10 animate-pulse text-xs">?</div>
+               ))}
+            </div>
+
             {localPlayer.isHost && (
               <button 
                 onClick={onStartGame} 
-                disabled={!canStart} 
-                className={`px-16 py-6 font-brand text-2xl lg:text-4xl rounded-3xl transition-all ${canStart ? 'bg-yellow-500 text-emerald-950 shadow-[0_8px_0_#a16207] active:translate-y-1 active:shadow-none' : 'bg-white/10 text-white/20 cursor-not-allowed border border-white/5 opacity-50'}`}
+                disabled={gameState.players.length < 2} 
+                className={`w-full py-5 text-black font-brand text-2xl rounded-2xl shadow-2xl active:scale-95 transition-all uppercase italic border-b-4 ${isRanked ? 'bg-yellow-600 border-yellow-800' : 'bg-yellow-500 border-yellow-700'}`}
               >
-                {canStart ? 'COMBATER' : `MÍNIMO 2 COMBATENTES`}
+                Iniciar Combate
               </button>
             )}
-          </div>
-        </div>
+            
+            {!localPlayer.isHost && (
+              <p className="text-white/40 font-brand text-xs animate-pulse italic">Aguardando mestre da arena...</p>
+            )}
+         </div>
+      </div>
     );
   }
 
-  const topDiscard = gameState.discardPile[gameState.discardPile.length - 1];
-
   return (
-    <div className="flex-1 flex flex-col h-full relative overflow-hidden bg-[#022c22]">
-      <div className={`absolute inset-0 opacity-10 pointer-events-none transition-colors duration-500 ${COLOR_CLASSES[gameState.currentColor]}`}></div>
-      
-      {/* Botões de Canto */}
-      <div className="absolute top-4 right-4 flex gap-2 z-[200]">
-        <button onClick={() => setShowAudioSettings(!showAudioSettings)} className="w-10 h-10 rounded-full bg-black/40 flex items-center justify-center text-xl border border-white/10 shadow-lg">⚙️</button>
-      </div>
+    <div className="h-full w-full relative overflow-hidden bg-black flex flex-col">
+      <div className="flex-1 relative">
+        <div className="arena-table"><div className="arena-facet"></div></div>
 
-      {showAudioSettings && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[500] flex items-center justify-center p-6" onClick={() => setShowAudioSettings(false)}>
-           <div className="bg-emerald-950 p-8 rounded-[3rem] border border-white/10 w-full max-w-sm" onClick={e => e.stopPropagation()}>
-              <h3 className="text-2xl font-brand text-yellow-400 mb-6 italic text-center">AUDIO ARENA</h3>
-              <div className="space-y-6">
-                 <div>
-                    <label className="text-[10px] font-black uppercase text-white/30 block mb-2">Volume Geral</label>
-                    <input type="range" min="0" max="1" step="0.1" value={vol} onChange={e => { const v = parseFloat(e.target.value); setVol(v); audio.setVolume(v); }} className="w-full accent-yellow-500" />
-                 </div>
-                 <button onClick={() => audio.nextTrack()} className="w-full py-4 bg-white/5 rounded-2xl font-bold uppercase text-[10px] tracking-widest hover:bg-white/10 transition-colors">Próxima Música 🎵</button>
-                 <button onClick={() => audio.toggleMute()} className="w-full py-4 bg-red-600/20 text-red-400 rounded-2xl font-bold uppercase text-[10px] tracking-widest hover:bg-red-600/40 transition-colors">Silenciar 🔇</button>
-                 <button onClick={() => setShowAudioSettings(false)} className="w-full py-4 bg-yellow-500 text-emerald-950 rounded-2xl font-brand text-xl">SALVAR</button>
-              </div>
+        {otherPlayers.map((p, i) => {
+          const total = otherPlayers.length;
+          const radiusX = window.innerWidth < 768 ? 35 : 40;
+          const radiusY = window.innerWidth < 768 ? 20 : 25;
+          const angle = (180 / (total + 1)) * (i + 1);
+          const radian = ((180 - angle) * Math.PI) / 180;
+          const x = 50 + radiusX * Math.cos(radian);
+          const y = 40 - radiusY * Math.sin(radian);
+          return <PlayerVisual key={p.id} p={p} isCurrent={currentPlayer?.id === p.id} positionStyle={{ left: `${x}%`, top: `${y}%`, transform: 'translate(-50%, -50%)', position: 'absolute' }} reaction={reactions[p.id]} />;
+        })}
+
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[60] flex items-center gap-8 lg:gap-32">
+           <button onClick={() => isMyTurn && onDrawCard(localPlayerId)} disabled={!isMyTurn} className={`active:scale-95 transition-all ${!isMyTurn ? 'opacity-40 grayscale' : ''}`}>
+              <UnoCard card={{} as any} hidden size="sm" />
+           </button>
+           <div className="relative">
+              <UnoCard card={topDiscard} skin={equippedSkin} size="sm" />
+              <div className={`absolute -top-2 -right-2 w-8 h-8 rounded-full border-2 border-white shadow-xl ${COLOR_CLASSES[gameState.currentColor]}`}></div>
            </div>
         </div>
-      )}
 
-      <div className="h-20 lg:h-28 flex justify-center items-center gap-3 lg:gap-12 px-2 z-50 pt-2">
-        {gameState.players.filter(p => p.id !== localPlayerId).map((opp) => (
-          <PlayerVisual key={opp.id} p={opp} />
-        ))}
-      </div>
-
-      <div className="flex-1 flex items-center justify-center relative scale-85 lg:scale-100 z-20">
-        <div className="flex items-center gap-10 lg:gap-20 relative">
-          <button onClick={() => isMyTurn && onDrawCard(localPlayerId)} disabled={!isMyTurn} className={`transform active:scale-95 transition-all ${isMyTurn ? 'cursor-pointer hover:scale-110' : 'opacity-20'}`}>
-            <UnoCard card={{} as any} hidden size="md" />
-          </button>
-          <div className="relative">
-            <UnoCard card={topDiscard} skin={equippedSkin} size="md" disabled />
-            <div className={`absolute -top-4 -right-4 lg:-top-6 lg:-right-6 w-10 h-10 lg:w-16 lg:h-16 rounded-full border-4 border-white shadow-2xl ${COLOR_CLASSES[gameState.currentColor]} animate-pulse`}></div>
+        {showPicker && (
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center pointer-events-none">
+            <div className="absolute inset-0 bg-black/70 backdrop-blur-md pointer-events-auto" onClick={() => setShowPicker(false)}></div>
+            <div className="relative w-80 h-80 lg:w-[450px] lg:h-[450px] animate-scale-in pointer-events-auto flex items-center justify-center">
+              <div className="absolute inset-0 rounded-full border-[12px] border-white/10 animate-spin-slow"></div>
+              <div className="absolute inset-0 grid grid-cols-2 grid-rows-2 gap-3 p-3">
+                <button 
+                  onClick={() => { onPlayCard(localPlayerId, selectedIds, CardColor.RED, unoDeclared); setShowPicker(false); }} 
+                  className="bg-red-600 rounded-tl-full border-4 border-white/40 active:scale-90 transition-all shadow-2xl hover:brightness-125"
+                ></button>
+                <button 
+                  onClick={() => { onPlayCard(localPlayerId, selectedIds, CardColor.BLUE, unoDeclared); setShowPicker(false); }} 
+                  className="bg-blue-600 rounded-tr-full border-4 border-white/40 active:scale-90 transition-all shadow-2xl hover:brightness-125"
+                ></button>
+                <button 
+                  onClick={() => { onPlayCard(localPlayerId, selectedIds, CardColor.GREEN, unoDeclared); setShowPicker(false); }} 
+                  className="bg-green-600 rounded-bl-full border-4 border-white/40 active:scale-90 transition-all shadow-2xl hover:brightness-125"
+                ></button>
+                <button 
+                  onClick={() => { onPlayCard(localPlayerId, selectedIds, CardColor.YELLOW, unoDeclared); setShowPicker(false); }} 
+                  className="bg-yellow-400 rounded-br-full border-4 border-white/40 active:scale-90 transition-all shadow-2xl hover:brightness-125"
+                ></button>
+              </div>
+              <div className="absolute w-24 h-24 bg-black rounded-full border-4 border-white flex items-center justify-center shadow-[0_0_50px_rgba(255,255,255,0.4)] z-10 text-4xl">🎨</div>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
-      <div className="h-[45%] flex flex-col items-center justify-end z-[100] relative pb-2">
-        {isMyTurn && <div className="bg-yellow-500 text-emerald-950 px-6 py-1.5 rounded-full font-brand text-xs lg:text-xl shadow-2xl border-2 border-white animate-bounce mb-2">SUA VEZ!</div>}
-        <div className="w-[95%] max-w-4xl bg-black/80 backdrop-blur-3xl rounded-[2.5rem] border border-white/10 p-2 lg:p-3 flex items-center justify-between shadow-2xl mb-4">
-           <div className="flex items-center gap-3">
-              <PlayerVisual p={localPlayer} isLocal />
-              <div className="flex gap-2">
-                 <button onClick={() => setShowEmojiMenu(!showEmojiMenu)} className={`w-9 h-9 rounded-full flex items-center justify-center transition-colors ${showEmojiMenu ? 'bg-yellow-500 text-emerald-900' : 'bg-white/5'}`}>💬</button>
-                 <button onClick={() => setShowVoiceMenu(!showVoiceMenu)} className={`w-9 h-9 rounded-full flex items-center justify-center transition-colors ${showVoiceMenu ? 'bg-blue-500 text-white' : 'bg-white/5'}`}>🗣️</button>
+      <div className="h-[40vh] bg-gradient-to-t from-black via-black/95 to-transparent relative z-[200] flex flex-col">
+        <div className="px-4 py-3 flex items-center justify-between border-t border-white/10 bg-black/60">
+           <div className="flex items-center gap-4">
+              <PlayerVisual p={localPlayer} isCurrent={isMyTurn} isLocal reaction={reactions[localPlayerId]} />
+              <div className="flex flex-col gap-1">
+                 <p className="text-xs font-brand text-white italic truncate max-w-[80px]">{localPlayer.name}</p>
+                 <div className="flex gap-2">
+                    <button onClick={() => { audio.play('click'); setActiveMenu('emoji'); }} className="w-8 h-8 rounded-lg bg-white/10 border border-white/20 text-sm flex items-center justify-center shadow-xl active:scale-90 transition-transform">💬</button>
+                    <button onClick={() => { audio.play('click'); setActiveMenu('voice'); }} className="w-8 h-8 rounded-lg bg-white/10 border border-white/20 text-sm flex items-center justify-center shadow-xl active:scale-90 transition-transform">🗣️</button>
+                    <button onClick={() => { audio.play('click'); setActiveMenu('audio'); }} className="w-8 h-8 rounded-lg bg-white/10 border border-white/20 text-sm flex items-center justify-center shadow-xl active:scale-90 transition-transform">🎵</button>
+                 </div>
               </div>
            </div>
-           <div className="flex items-center gap-3">
+           <div className="flex items-center gap-4">
               {localPlayer.hand.length === 2 && isMyTurn && !unoDeclared && (
-                <button onClick={() => { setUnoDeclared(true); onCallUno(localPlayerId); }} className="px-5 py-2 bg-red-600 text-white font-brand text-xs lg:text-lg rounded-full animate-pulse shadow-xl">UNO!</button>
+                <button onClick={() => { setUnoDeclared(true); onCallUno(localPlayerId); }} className="px-4 py-2 bg-red-600 text-white font-brand text-xs rounded-xl animate-bounce border-2 border-white shadow-2xl">UNO!</button>
               )}
               {selectedIds.length > 0 && !showPicker && (
-                <button onClick={() => onPlayCard(localPlayerId, selectedIds, undefined, unoDeclared)} className="px-8 py-3 bg-yellow-500 text-emerald-950 font-brand text-sm lg:text-2xl rounded-full shadow-xl">JOGAR</button>
+                <button onClick={() => onPlayCard(localPlayerId, selectedIds, undefined, unoDeclared)} className="px-6 py-3 bg-yellow-500 text-black font-brand text-sm rounded-xl shadow-2xl uppercase active:scale-95 italic border-b-4 border-yellow-700">LANÇAR</button>
               )}
-              {isMyTurn && <div className="bg-white/10 px-4 py-2 rounded-full font-brand text-sm lg:text-xl text-yellow-400 border border-white/5">{timeLeft}s</div>}
+              {isMyTurn && <div className="bg-yellow-500/20 border-2 border-yellow-500/40 px-4 py-2 rounded-xl font-brand text-yellow-400 text-lg tabular-nums shadow-inner">{timeLeft}s</div>}
            </div>
         </div>
-        <div className="w-full h-32 lg:h-40 overflow-visible">{renderHand()}</div>
+
+        <div className="flex-1 flex justify-center items-end relative overflow-visible px-4 pb-8">
+          <div className="flex justify-center items-end h-full">
+            {localPlayer.hand.map((card, i) => {
+              const total = localPlayer.hand.length;
+              const mid = (total - 1) / 2;
+              const angle = (i - mid) * (total > 10 ? 2 : 4);
+              const isSelected = selectedIds.includes(card.id);
+              
+              return (
+                <div 
+                  key={card.id} onClick={() => handleCardSelect(card.id)}
+                  className={`transition-all duration-300 relative transform-gpu cursor-pointer group 
+                    ${isSelected ? '-translate-y-16 scale-110 z-[1000]' : 'hover:-translate-y-12 hover:z-[5000] hover:scale-125'}`}
+                  style={{ 
+                    marginLeft: i === 0 ? 0 : '-40px', 
+                    transform: !isSelected ? `rotate(${angle}deg) translateY(${Math.abs(i - mid) * 3}px)` : 'none',
+                    zIndex: isSelected ? 1000 : i
+                  }}
+                >
+                  <UnoCard card={card} size="sm" playable={isMyTurn && isMoveValid(card, gameState, localPlayer.hand)} disabled={!isMyTurn} />
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
-      {showEmojiMenu && (
-        <div className="fixed inset-0 bg-black/40 z-[600]" onClick={() => setShowEmojiMenu(false)}>
-          <div className="absolute bottom-40 left-10 bg-[#021a14] p-4 rounded-3xl border border-white/10 grid grid-cols-4 gap-2 animate-slide-up shadow-2xl" onClick={e => e.stopPropagation()}>
-             {ALL_EMOJIS.map(e => <button key={e} onClick={() => { onSendReaction(localPlayerId, e); setShowEmojiMenu(false); }} className="text-3xl p-2 hover:scale-125 transition-transform">{e}</button>)}
-          </div>
-        </div>
-      )}
-
-      {showVoiceMenu && (
-        <div className="fixed inset-0 bg-black/40 z-[600]" onClick={() => setShowVoiceMenu(false)}>
-          <div className="absolute bottom-40 left-10 bg-[#021a14] p-4 rounded-3xl border border-white/10 flex flex-col gap-1 animate-slide-up w-64 max-h-60 overflow-y-auto no-scrollbar shadow-2xl" onClick={e => e.stopPropagation()}>
-             {VOICE_PHRASES.map(v => <button key={v} onClick={() => { onSendVoice(localPlayerId, v); setShowVoiceMenu(false); }} className="text-left px-4 py-3 hover:bg-white/10 rounded-xl text-[8px] font-black uppercase tracking-widest border border-white/5 text-white/60">{v}</button>)}
-          </div>
-        </div>
-      )}
-
-      {showPicker && (
-        <div className="fixed inset-0 bg-black/95 backdrop-blur-3xl z-[600] flex items-center justify-center animate-fade-in p-6">
-           <div className="bg-emerald-950/40 p-8 rounded-[3rem] border border-white/10 text-center max-w-sm w-full">
-              <h3 className="text-2xl font-brand text-yellow-400 mb-8 italic uppercase">ESCOLHA A COR</h3>
-              <div className="grid grid-cols-2 gap-4">
-                {[CardColor.RED, CardColor.BLUE, CardColor.GREEN, CardColor.YELLOW].map(c => <button key={c} onClick={() => { onPlayCard(localPlayerId, selectedIds, c, unoDeclared); setShowPicker(false); }} className={`w-full aspect-square rounded-3xl ${COLOR_CLASSES[c]} border-4 border-white/10 hover:border-white transition-all shadow-xl`}></button>)}
+      <div className={`fixed inset-0 z-[10000] transition-opacity duration-300 ${activeMenu ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+         <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={() => setActiveMenu(null)}></div>
+         <div className={`absolute bottom-0 left-0 right-0 bg-[#120000] border-t-4 border-white/10 rounded-t-[3rem] p-8 pb-12 transition-transform duration-500 shadow-[0_-20px_50px_rgba(0,0,0,0.5)] ${activeMenu ? 'translate-y-0' : 'translate-y-full'}`}>
+            <div className="w-16 h-1.5 bg-white/20 rounded-full mx-auto mb-8"></div>
+            
+            {activeMenu === 'emoji' && (
+              <div className="grid grid-cols-4 gap-6 animate-fade-in justify-items-center">
+                {['😂', '😈', '😡', '🥱', '🤫', '💀', '🔥', '👑', '💣', '💩', '🤝', '🍀', '🤡', '🤑', '🤬', '🚀'].map(e => (
+                  <button key={e} onClick={() => { onSendReaction(localPlayerId, e); setActiveMenu(null); }} className="text-5xl active:scale-150 transition-transform p-3 hover:bg-white/5 rounded-2xl">{e}</button>
+                ))}
               </div>
-           </div>
-        </div>
-      )}
+            )}
+            
+            {activeMenu === 'voice' && (
+              <div className="flex flex-col gap-3 animate-fade-in max-h-[50vh] overflow-y-auto no-scrollbar pr-2">
+                {VOICE_PHRASES.map(v => (
+                  <button key={v} onClick={() => { onSendVoice(localPlayerId, v); setActiveMenu(null); }} className="text-left p-5 bg-white/5 rounded-2xl text-xs font-black uppercase text-white/70 active:bg-yellow-500 active:text-black border border-white/10 transition-all">{v}</button>
+                ))}
+              </div>
+            )}
+            
+            {activeMenu === 'audio' && (
+              <div className="flex flex-col gap-8 animate-fade-in">
+                <h4 className="text-yellow-400 font-brand text-center italic uppercase tracking-widest text-xl">Controle da Arena</h4>
+                <div className="space-y-6 px-4">
+                  <div className="flex justify-between text-xs font-black text-white/50 uppercase tracking-widest">
+                    <span>Master Volume</span>
+                    <span className="text-yellow-400">{Math.round(audioVolume * 100)}%</span>
+                  </div>
+                  <input 
+                    type="range" min="0" max="1" step="0.01" value={audioVolume} 
+                    onChange={(e) => { const v = parseFloat(e.target.value); setAudioVolume(v); audio.setVolume(v); }} 
+                    className="w-full h-3 bg-white/10 rounded-full appearance-none accent-yellow-500" 
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-6">
+                  <button onClick={() => { audio.play('click'); setAudioMuted(audio.toggleMute()); }} className={`py-6 rounded-3xl font-brand text-sm border-2 transition-all flex items-center justify-center gap-3 ${audioMuted ? 'bg-red-600/20 border-red-500 text-red-500 shadow-[0_0_20px_rgba(239,68,68,0.3)]' : 'bg-white/5 border-white/10 text-white'}`}>{audioMuted ? '🔇 MUDO' : '🔊 ÁUDIO'}</button>
+                  <button onClick={() => { audio.play('click'); audio.nextTrack(); }} className="py-6 bg-yellow-500 text-black rounded-3xl font-brand text-sm shadow-2xl active:scale-95 border-b-4 border-yellow-700">⏭️ TROCAR FAIXA</button>
+                </div>
+                <button onClick={() => setActiveMenu(null)} className="w-full py-6 bg-white/10 rounded-3xl font-brand text-lg border border-white/20 uppercase italic mt-4">Fechar Configurações</button>
+              </div>
+            )}
+         </div>
+      </div>
     </div>
   );
 };

@@ -3,36 +3,160 @@
 <html lang="pt-br">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🃏</text></svg>">
-  <title>UNO Online - Battle Arena</title>
+  <title>UNO Arena Mobile</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=Quicksand:wght@400;700&display=swap" rel="stylesheet">
   <style>
-    body { font-family: 'Quicksand', sans-serif; margin: 0; padding: 0; overflow: hidden; background-color: #022c22; touch-action: manipulation; }
-    .font-brand { font-family: 'Fredoka One', cursive; }
-    @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
-    @keyframes slide-up { from { transform: translateY(50px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-    @keyframes reaction-float { 
-      0% { transform: translateY(0) scale(0.5); opacity: 0; }
-      20% { transform: translateY(-20px) scale(1.2); opacity: 1; }
-      80% { transform: translateY(-40px) scale(1); opacity: 1; }
-      100% { transform: translateY(-60px) scale(0.8); opacity: 0; }
+    :root {
+      --arena-glow: #ff7b00;
+      --arena-dark: #4b0000;
     }
-    .animate-fade-in { animation: fade-in 0.5s ease-out forwards; }
-    .animate-slide-up { animation: slide-up 0.5s ease-out forwards; }
-    .animate-reaction { animation: reaction-float 2.5s ease-out forwards; }
+    body { 
+      font-family: 'Quicksand', sans-serif; 
+      margin: 0; 
+      padding: 0; 
+      overflow: hidden; 
+      background: #000;
+      touch-action: none; 
+      -webkit-user-select: none;
+      user-select: none;
+      width: 100vw;
+      height: 100vh;
+      position: fixed;
+    }
+    
+    .nebula {
+      position: fixed;
+      inset: 0;
+      background: radial-gradient(circle at 50% 50%, #1a0000 0%, #000 100%);
+      z-index: -2;
+    }
+
+    .particles {
+      position: fixed;
+      inset: 0;
+      background-image: url('https://www.transparenttextures.com/patterns/carbon-fibre.png');
+      opacity: 0.1;
+      z-index: -1;
+    }
+
+    .vignette {
+      position: fixed;
+      inset: 0;
+      background: radial-gradient(circle at center, transparent 30%, rgba(0,0,0,0.8) 100%);
+      pointer-events: none;
+      z-index: 90;
+    }
+
+    .font-brand { font-family: 'Fredoka One', cursive; }
+    
+    @keyframes rotate-cw { from { transform: translate(-50%, -50%) rotate(0deg); } to { transform: translate(-50%, -50%) rotate(360deg); } }
+    @keyframes rotate-ccw { from { transform: translate(-50%, -50%) rotate(0deg); } to { transform: translate(-50%, -50%) rotate(-360deg); } }
+    @keyframes spin-slow { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+    .direction-arrow-cw { animation: rotate-cw 12s linear infinite; }
+    .direction-arrow-ccw { animation: rotate-ccw 12s linear infinite; }
+    .animate-spin-slow { animation: spin-slow 15s linear infinite; }
+
+    .arena-table {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 80vh;
+      height: 80vh;
+      background: radial-gradient(circle, #ff6a00 0%, #3a0000 70%, transparent 100%);
+      border-radius: 50%;
+      box-shadow: 0 0 80px rgba(255, 106, 0, 0.15);
+      z-index: 1;
+    }
+
+    .arena-facet {
+       position: absolute;
+       inset: 15%;
+       background: rgba(255, 255, 255, 0.03);
+       clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+       opacity: 0.2;
+    }
+
     .no-scrollbar::-webkit-scrollbar { display: none; }
     .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-    @media (max-width: 768px) { .card-stack-offset { margin-left: -40px !important; } }
+
+    .player-node {
+      position: absolute;
+      transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    @keyframes scale-in {
+      from { transform: scale(0.5); opacity: 0; }
+      to { transform: scale(1); opacity: 1; }
+    }
+    .animate-scale-in { animation: scale-in 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
+    
+    @keyframes shockwave {
+      0% { transform: translate(-50%, -50%) scale(0.2); opacity: 1; border-width: 40px; }
+      100% { transform: translate(-50%, -50%) scale(4); opacity: 0; border-width: 1px; }
+    }
+    .plus4-shockwave {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      width: 500px;
+      height: 500px;
+      border: 20px solid #ea6208;
+      border-radius: 50%;
+      pointer-events: none;
+      z-index: 4000;
+      animation: shockwave 0.8s ease-out forwards;
+      box-shadow: inset 0 0 50px #ff0000, 0 0 50px #ff7b00;
+    }
+
+    @keyframes screenshake {
+      0% { transform: translate(0, 0); }
+      10% { transform: translate(-10px, -10px); }
+      20% { transform: translate(10px, 5px); }
+      30% { transform: translate(-5px, 10px); }
+      40% { transform: translate(5px, -5px); }
+      50% { transform: translate(-10px, 5px); }
+      60% { transform: translate(10px, -10px); }
+      70% { transform: translate(-5px, 5px); }
+      80% { transform: translate(5px, 10px); }
+      90% { transform: translate(-10px, -5px); }
+      100% { transform: translate(0, 0); }
+    }
+    .shake-active { animation: screenshake 0.4s ease-in-out infinite; }
+
+    @keyframes flash-impact {
+      0% { filter: brightness(1) saturate(1); }
+      20% { filter: brightness(2) saturate(3); }
+      100% { filter: brightness(1) saturate(1); }
+    }
+    .flash-active { animation: flash-impact 0.6s ease-out forwards; }
+
+    .safe-area-inset {
+      padding-top: env(safe-area-inset-top);
+      padding-bottom: env(safe-area-inset-bottom);
+      padding-left: env(safe-area-inset-left);
+      padding-right: env(safe-area-inset-right);
+    }
+
+    @keyframes slide-up {
+      from { transform: translateY(20px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+    .animate-slide-up { animation: slide-up 0.3s ease-out forwards; }
   </style>
   <script type="importmap">
 {
   "imports": {
-    "react-dom/": "https://esm.sh/react-dom@19.0.0/",
-    "react/": "https://esm.sh/react@19.0.0/",
     "react": "https://esm.sh/react@19.0.0",
+    "react-dom/client": "https://esm.sh/react-dom@19.0.0/client",
     "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2.48.1",
+    "@google/genai": "https://esm.sh/@google/genai@^1.34.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react/": "https://esm.sh/react@^19.2.3/",
     "vite": "https://esm.sh/vite@^7.3.0",
     "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2"
   }
@@ -40,7 +164,10 @@
 </script>
 </head>
 <body>
+  <div class="nebula"></div>
+  <div class="particles"></div>
+  <div class="vignette"></div>
   <div id="root"></div>
-  <script type="module" src="index.tsx"></script>
+  <script type="module" src="./index.tsx"></script>
 </body>
 </html>

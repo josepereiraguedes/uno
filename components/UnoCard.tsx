@@ -33,7 +33,8 @@ const UnoCard: React.FC<UnoCardProps> = ({ card, onClick, disabled, playable, si
     }
   };
 
-  if (hidden) {
+  // Se a carta for indefinida, renderiza um placeholder vazio ou a parte de trás
+  if (!card || hidden) {
     const backGradient = skin === 'gold_skin' 
       ? 'from-yellow-600 via-yellow-400 to-yellow-800' 
       : 'from-red-700 via-red-800 to-zinc-950';

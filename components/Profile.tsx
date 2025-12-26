@@ -1,110 +1,184 @@
 
-import React, { useState } from 'react';
-import { AppView } from '../types';
+import React, { useState, useRef } from 'react';
+import { AppView, DailyMission } from '../types';
 import { AVATARS } from '../constants';
+import { localDb } from '../services/localDb';
 
 interface ProfileProps {
   profile: any;
+  missions: DailyMission[];
   onNavigate: (view: AppView) => void;
-  onUpdateAvatar: (avatar: string) => void;
+  onUpdateProfile: (updates: any) => void;
 }
 
-const Profile: React.FC<ProfileProps> = ({ profile, onNavigate, onUpdateAvatar }) => {
-  const [showAvatarSelect, setShowAvatarSelect] = useState(false);
-  const winRate = profile.stats.totalGames > 0 
-    ? ((profile.stats.wins / profile.stats.totalGames) * 100).toFixed(1) 
-    : "0";
+const Profile: React.FC<ProfileProps> = ({ profile, missions, onNavigate, onUpdateProfile }) => {
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [adjustingImage, setAdjustingImage] = useState<string | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const [fitScale, setFitScale] = useState(1);
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setAdjustingImage(reader.result as string);
+        setZoom(1);
+        setPosition({ x: 0, y: 0 });
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleApplyCrop = () => {
+    if (!canvasRef.current || !imgRef.current) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const size = 400; 
+    canvas.width = size;
+    canvas.height = size;
+
+    const previewSize = 256;
+    const ratio = size / previewSize;
+    const finalScale = fitScale * zoom * ratio;
+    
+    const drawWidth = imgRef.current.naturalWidth * finalScale;
+    const drawHeight = imgRef.current.naturalHeight * finalScale;
+    
+    const centerX = size / 2 + position.x * ratio;
+    const centerY = size / 2 + position.y * ratio;
+
+    ctx.drawImage(imgRef.current, centerX - drawWidth / 2, centerY - drawHeight / 2, drawWidth, drawHeight);
+
+    const croppedBase64 = canvas.toDataURL('image/jpeg', 0.85);
+    onUpdateProfile({ photoUrl: croppedBase64 });
+    setAdjustingImage(null);
+  };
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-6 animate-fade-in relative z-10 overflow-y-auto no-scrollbar">
-      <div className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-3 gap-6 items-start py-10">
-        
-        {/* LADO ESQUERDO: PERFIL */}
-        <div className="lg:col-span-1 flex flex-col items-center space-y-6 bg-white/5 p-8 rounded-[3rem] border border-white/10 backdrop-blur-3xl">
-          <div className="relative group cursor-pointer" onClick={() => setShowAvatarSelect(true)}>
-            <div className="w-32 h-32 lg:w-40 lg:h-40 rounded-full bg-yellow-400 border-8 border-white shadow-2xl flex items-center justify-center text-7xl lg:text-8xl transition-transform group-hover:scale-105">
-              {profile.avatar}
-            </div>
-            <div className="absolute bottom-1 right-1 bg-blue-500 w-8 h-8 rounded-full flex items-center justify-center border-4 border-[#022c22] text-xs">✏️</div>
-          </div>
-          
-          <div className="text-center">
-            <h2 className="text-4xl font-brand text-white italic truncate w-full">{profile.name}</h2>
-            <div className="flex flex-wrap items-center justify-center gap-2 mt-2">
-               <span className="px-3 py-1 bg-yellow-500/20 text-yellow-400 rounded-full text-[9px] font-black uppercase tracking-widest">{profile.rank}</span>
-               <span className="px-3 py-1 bg-blue-500/20 text-blue-400 rounded-full text-[9px] font-black uppercase tracking-widest">LVL {profile.level}</span>
-            </div>
-          </div>
+    <div className="flex-1 flex flex-col p-4 pb-20 animate-fade-in relative z-10 overflow-y-auto no-scrollbar bg-black">
+      {/* Mobile Top Header */}
+      <div className="flex justify-between items-center mb-6 pt-4 px-2">
+         <h1 className="text-3xl font-brand text-white italic">DASHBOARD</h1>
+         <div className="flex gap-2">
+           <div className="bg-yellow-500/10 px-4 py-2 rounded-full border border-yellow-500/20">
+             <span className="text-yellow-400 font-brand">🪙 {profile.coins}</span>
+           </div>
+         </div>
+      </div>
 
-          <div className="flex flex-col gap-3 w-full pt-4">
-            <button onClick={() => onNavigate(AppView.LOBBY)} className="w-full py-5 bg-yellow-500 hover:bg-yellow-400 text-emerald-950 font-brand text-2xl rounded-2xl shadow-[0_6px_0_#a16207] active:translate-y-1 active:shadow-none transition-all italic">
-              COMBATER
-            </button>
-            <div className="grid grid-cols-2 gap-2">
-              <button onClick={() => onNavigate(AppView.STORE)} className="py-3 bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 font-brand text-[9px] uppercase tracking-widest">Loja 🛒</button>
-              <button onClick={() => onNavigate(AppView.RANKING)} className="py-3 bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 font-brand text-[9px] uppercase tracking-widest">Rank 🏆</button>
+      <div className="flex flex-col gap-6">
+        {/* Profile Card Mobile */}
+        <div className="bg-white/5 p-6 rounded-[2.5rem] border border-white/10 flex items-center gap-6">
+          <div className="relative" onClick={() => setShowEditModal(true)}>
+             <div className="w-24 h-24 rounded-full border-4 border-yellow-400 overflow-hidden shadow-2xl flex items-center justify-center text-5xl bg-yellow-500/20">
+                {profile.photoUrl ? <img src={profile.photoUrl} className="w-full h-full object-cover" /> : profile.avatar}
+             </div>
+             <div className="absolute -bottom-1 -right-1 bg-blue-500 w-8 h-8 rounded-full border-2 border-black flex items-center justify-center text-xs">✏️</div>
+          </div>
+          <div className="flex-1">
+            <h2 className="text-2xl font-brand text-white italic">{profile.name}</h2>
+            <p className="text-[10px] text-yellow-500 uppercase font-black tracking-widest">{profile.rank}</p>
+            <div className="w-full h-1.5 bg-white/5 rounded-full mt-2 overflow-hidden">
+               <div className="h-full bg-blue-500" style={{width: '40%'}}></div>
             </div>
           </div>
         </div>
 
-        {/* CENTRO: ESTATÍSTICAS */}
-        <div className="lg:col-span-1 space-y-6">
-          <div className="bg-black/40 p-8 rounded-[3rem] border border-white/5 backdrop-blur-xl">
-             <h3 className="font-brand text-xl text-blue-400 mb-6 italic">REGISTRO DE GUERRA</h3>
-             <div className="grid grid-cols-2 gap-3">
-                <StatCard label="Vitórias" value={profile.stats.wins} color="text-emerald-400" />
-                <StatCard label="Win Rate" value={`${winRate}%`} color="text-yellow-400" />
-                <StatCard label="MMR" value={profile.mmr} color="text-blue-400" />
-                <StatCard label="Total Jogos" value={profile.stats.totalGames} color="text-white/40" />
-             </div>
-          </div>
-
-          <div className="bg-black/20 p-8 rounded-[3rem] border border-white/5">
-             <h3 className="font-brand text-xl text-yellow-400 mb-6 italic">MEDALHAS</h3>
-             <div className="flex flex-wrap gap-3">
-                <AchievementBadge icon="🎖️" name="VETERANO" unlocked={profile.stats.totalGames >= 5} />
-                <AchievementBadge icon="🔥" name="SÉRIE" unlocked={false} />
-                <AchievementBadge icon="💎" name="ELITE" unlocked={profile.mmr >= 1500} />
-                <AchievementBadge icon="🃏" name="MESTRE" unlocked={profile.stats.totalCardsPlayed > 50} />
-             </div>
-          </div>
+        {/* Action Buttons Mobile Grid */}
+        <div className="grid grid-cols-2 gap-3">
+          <button onClick={() => onNavigate(AppView.LOBBY)} className="col-span-2 py-6 bg-yellow-500 text-emerald-950 font-brand text-2xl rounded-3xl shadow-lg active:scale-95 transition-all">JOGAR AGORA</button>
+          <button onClick={() => onNavigate(AppView.STORE)} className="py-4 bg-white/5 border border-white/10 rounded-2xl font-brand text-sm italic">LOJA 🛒</button>
+          <button onClick={() => onNavigate(AppView.RANKING)} className="py-4 bg-white/5 border border-white/10 rounded-2xl font-brand text-sm italic">RANK 🏆</button>
         </div>
 
-        {/* DIREITO: HISTÓRICO */}
-        <div className="lg:col-span-1 bg-black/40 p-8 rounded-[3rem] border border-white/5 flex flex-col h-full max-h-[500px]">
-           <h3 className="font-brand text-xl text-white/40 mb-6 italic">ÚLTIMAS BATALHAS</h3>
-           <div className="flex-1 overflow-y-auto space-y-2 no-scrollbar">
-              {profile.history.length === 0 ? (
-                <p className="text-center text-white/10 font-black uppercase text-[8px] py-10 tracking-widest">Nenhum combate registrado</p>
-              ) : (
-                profile.history.map((h: any, i: number) => (
-                  <div key={i} className="bg-white/5 p-3 rounded-xl border border-white/5 flex justify-between items-center">
-                     <div className="flex items-center gap-3">
-                        <span className={`w-2 h-2 rounded-full ${h.result === 'WIN' ? 'bg-emerald-500' : 'bg-red-500'}`}></span>
-                        <span className="font-black uppercase text-[10px] tracking-tighter">{h.result === 'WIN' ? 'Vitória' : 'Derrota'}</span>
-                     </div>
-                     <div className="text-right">
-                        <span className={`font-brand text-sm ${h.mmr > 0 ? 'text-emerald-400' : 'text-red-400'}`}>{h.mmr > 0 ? '+' : ''}{h.mmr} MMR</span>
-                        <p className="text-[7px] text-white/20 uppercase font-black">{new Date(h.date).toLocaleDateString()}</p>
-                     </div>
-                  </div>
-                ))
-              )}
+        {/* Daily Missions Scrollable Mobile */}
+        <div className="bg-white/5 p-6 rounded-[2.5rem] border border-white/10">
+           <h3 className="font-brand text-blue-400 mb-4 italic">MISSÕES DIÁRIAS</h3>
+           <div className="space-y-4">
+              {missions.map(m => (
+                <div key={m.id} className="bg-black/20 p-4 rounded-2xl border border-white/5">
+                   <div className="flex justify-between items-center mb-2">
+                     <span className="text-[10px] font-bold text-white/70 uppercase">{m.description}</span>
+                     <span className="text-yellow-400 text-xs font-brand">+{m.reward}</span>
+                   </div>
+                   <div className="w-full h-1 bg-white/10 rounded-full">
+                      <div className="h-full bg-blue-400" style={{width: `${(m.current/m.target)*100}%`}}></div>
+                   </div>
+                </div>
+              ))}
            </div>
         </div>
       </div>
 
-      {showAvatarSelect && (
-        <div className="fixed inset-0 bg-black/95 backdrop-blur-2xl z-[500] flex items-center justify-center p-6 animate-fade-in">
-          <div className="bg-emerald-950/40 p-10 rounded-[3rem] border border-white/10 max-w-md w-full text-center">
-            <h3 className="text-2xl font-brand text-yellow-400 mb-8 italic">MUDAR FACE</h3>
-            <div className="grid grid-cols-4 gap-4">
-              {AVATARS.map(a => (
-                <button key={a} onClick={() => { onUpdateAvatar(a); setShowAvatarSelect(false); }} className={`w-14 h-14 rounded-2xl flex items-center justify-center text-3xl transition-all ${profile.avatar === a ? 'bg-yellow-400 scale-110 shadow-xl' : 'bg-white/5 hover:bg-white/10 grayscale'}`}>{a}</button>
-              ))}
-            </div>
-            <button onClick={() => setShowAvatarSelect(false)} className="mt-8 text-white/20 uppercase font-black text-[9px] tracking-widest hover:text-white transition-colors">Fechar</button>
-          </div>
+      {showEditModal && (
+        <div className="fixed inset-0 bg-black/95 z-[500] flex flex-col p-6 animate-fade-in">
+           <div className="flex justify-between items-center mb-10">
+              <h2 className="text-3xl font-brand text-yellow-400 italic">EDITAR PERFIL</h2>
+              <button onClick={() => setShowEditModal(false)} className="text-2xl">✕</button>
+           </div>
+
+           {adjustingImage ? (
+             <div className="flex-1 flex flex-col items-center justify-center">
+                <div 
+                  className="w-64 h-64 rounded-full overflow-hidden border-4 border-yellow-400 bg-black relative cursor-move"
+                  onMouseDown={(e) => { setIsDragging(true); setDragStart({x: e.clientX - position.x, y: e.clientY - position.y}); }}
+                  onMouseMove={(e) => { if(isDragging) setPosition({x: e.clientX - dragStart.x, y: e.clientY - dragStart.y}); }}
+                  onMouseUp={() => setIsDragging(false)}
+                  onTouchStart={(e) => { setIsDragging(true); setDragStart({x: e.touches[0].clientX - position.x, y: e.touches[0].clientY - position.y}); }}
+                  onTouchMove={(e) => { if(isDragging) setPosition({x: e.touches[0].clientX - dragStart.x, y: e.touches[0].clientY - dragStart.y}); }}
+                  onTouchEnd={() => setIsDragging(false)}
+                >
+                  <img 
+                    ref={imgRef}
+                    src={adjustingImage}
+                    onLoad={() => {
+                      const {naturalWidth, naturalHeight} = imgRef.current!;
+                      setFitScale(Math.max(256/naturalWidth, 256/naturalHeight));
+                    }}
+                    style={{
+                      transform: `translate(calc(-50% + ${position.x}px), calc(-50% + ${position.y}px)) scale(${fitScale * zoom})`,
+                      position: 'absolute', top: '50%', left: '50%', maxWidth: 'none'
+                    }}
+                  />
+                </div>
+                <input type="range" min="1" max="3" step="0.01" value={zoom} onChange={e => setZoom(parseFloat(e.target.value))} className="w-full mt-10 accent-yellow-400" />
+                <div className="flex gap-4 w-full mt-10">
+                   <button onClick={() => setAdjustingImage(null)} className="flex-1 py-4 bg-white/10 rounded-xl font-brand">CANCELAR</button>
+                   <button onClick={handleApplyCrop} className="flex-1 py-4 bg-yellow-500 text-black rounded-xl font-brand">SALVAR</button>
+                </div>
+                <canvas ref={canvasRef} className="hidden" />
+             </div>
+           ) : (
+             <div className="flex-1 space-y-10">
+                <div className="flex flex-col items-center gap-6">
+                  <div className="w-32 h-32 rounded-full border-4 border-blue-500 flex items-center justify-center text-6xl">
+                    {profile.avatar}
+                  </div>
+                  <button onClick={() => fileInputRef.current?.click()} className="py-4 px-10 bg-blue-600 rounded-2xl font-brand text-xs">MUDAR FOTO 📸</button>
+                  <input ref={fileInputRef} type="file" className="hidden" accept="image/*" onChange={handleFileUpload} />
+                </div>
+                
+                <div>
+                   <h3 className="text-[10px] font-black text-white/30 uppercase tracking-[0.3em] mb-4">Escolha seu Avatar</h3>
+                   <div className="grid grid-cols-4 gap-4">
+                      {AVATARS.map(a => (
+                        <button key={a} onClick={() => onUpdateProfile({avatar: a, photoUrl: null})} className={`w-14 h-14 rounded-xl flex items-center justify-center text-3xl ${profile.avatar === a && !profile.photoUrl ? 'bg-yellow-500' : 'bg-white/5'}`}>{a}</button>
+                      ))}
+                   </div>
+                </div>
+                <button onClick={() => setShowEditModal(false)} className="w-full py-6 bg-yellow-500 text-black font-brand text-2xl rounded-3xl mt-auto">PRONTO</button>
+             </div>
+           )}
         </div>
       )}
     </div>
@@ -112,16 +186,9 @@ const Profile: React.FC<ProfileProps> = ({ profile, onNavigate, onUpdateAvatar }
 };
 
 const StatCard = ({ label, value, color }: any) => (
-  <div className="bg-black/20 p-4 rounded-2xl border border-white/5">
-    <span className="text-[7px] font-black uppercase tracking-widest text-white/30 block mb-1">{label}</span>
+  <div className="bg-black/20 p-4 rounded-2xl border border-white/5 flex flex-col items-center">
+    <span className="text-[8px] font-black uppercase text-white/30">{label}</span>
     <span className={`text-xl font-brand ${color}`}>{value}</span>
-  </div>
-);
-
-const AchievementBadge = ({ icon, name, unlocked }: any) => (
-  <div className={`w-14 h-16 rounded-xl flex flex-col items-center justify-center border transition-all ${unlocked ? 'bg-yellow-500/10 border-yellow-500/30' : 'bg-black/40 border-white/5 grayscale opacity-20'}`}>
-     <span className="text-xl">{icon}</span>
-     <span className="text-[6px] font-black uppercase mt-1 text-center px-1 text-white/40">{name}</span>
   </div>
 );
 

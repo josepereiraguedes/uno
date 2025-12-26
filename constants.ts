@@ -7,15 +7,32 @@ export const AVATARS = [
   '🦊', '🦁', '🐸', '🐼', '🐨', '🐯', '🐮', '🐵', '🐱', '🐶', '🦄', '🐲'
 ];
 
+export const NARRATION_PHRASES: Record<string, string[]> = {
+  FATAL_COLOR: ["ELE MUDOU A COR… E O ADVERSÁRIO FICOU SEM SAÍDA!", "Escolha fria, cálculo perfeito… essa cor muda o rumo!"],
+  PLUS_2: ["E LÁ VEM O +2! O jogo vira completamente!", "Ataque estratégico! Quebrou a sequência!"],
+  STACKING: ["EMPILHAMENTO ATIVO! A bomba só aumenta!", "A bomba tá crescendo! Quem vai segurar?"],
+  PLUS_4: ["+4 NA VEIA! ISSO É CRUELDADE PURA!", "FINAL BRUTAL! Não deu tempo de reagir!"],
+  REVERSE: ["REVERTEU O JOGO! AGORA É OUTRA HISTÓRIA!", "Mudou o fluxo! O contra-ataque começou!"],
+  SKIP: ["BLOQUEADO! ELE NÃO VAI JOGAR AGORA!", "Dormiu no ponto! Perdeu a vez!"],
+  UNO_CALL: ["UNO DECLARADO! A PRESSÃO ESTÁ LANÇADA!", "Ele tá por uma! O clímax chegou!"],
+  UNO_PENALTY: ["VACILOU! PENALIDADE APLICADA!", "Dormiu no ponto! Leva 2 pra casa!"],
+  WIN: ["VIRADA HISTÓRICA! NINGUÉM ACREDITAVA!", "JOGADA LIMPA, VITÓRIA MERECIDA!", "FINAL ABSURDO! QUE PARTIDA!"],
+  ESPELHO: ["ESPELHO ATIVADO! A CARTA VOLTOU!", "TIMING PERFEITO! ESPELHO IMPECÁVEL!"]
+};
+
 export const VOICE_PHRASES = [
-  "Aceita esse presente!",
-  "Boa sorte na próxima!",
-  "Eu sou o rei da arena!",
-  "Isso foi estratégico!",
-  "Não chora agora...",
-  "UNO na sua cara!",
-  "Vem tranquilo!",
-  "O jogo virou, não é mesmo?"
+  "🛒 Compra 4 e não bufa!",
+  "😴 Dormiu no ponto, hein?",
+  "🤫 Silêncio na arena!",
+  "🤡 O palhaço aqui é você!",
+  "🔥 Tá pegando fogo, bicho!",
+  "👑 Respeita o pai!",
+  "🧨 Essa vai doer...",
+  "🚑 Alguém chama a ambulância?",
+  "🥱 Ganho até de olho fechado.",
+  "🃏 Meu baralho, minhas regras!",
+  "👋 Tchau, obrigado!",
+  "🤨 Sério que você jogou isso?"
 ];
 
 export const generateDeck = (): Card[] => {
@@ -23,14 +40,12 @@ export const generateDeck = (): Card[] => {
   let idCounter = 0;
 
   COLORS.forEach(color => {
-    // 0-9
     for (let i = 0; i <= 9; i++) {
       const count = i === 0 ? 1 : 2;
       for (let j = 0; j < count; j++) {
         deck.push({ id: `card-${idCounter++}`, color, type: CardType.NUMBER, value: i });
       }
     }
-    // Especiais de cor
     for (let j = 0; j < 2; j++) {
       deck.push({ id: `card-${idCounter++}`, color, type: CardType.SKIP });
       deck.push({ id: `card-${idCounter++}`, color, type: CardType.REVERSE });
@@ -38,7 +53,6 @@ export const generateDeck = (): Card[] => {
     }
   });
 
-  // Coringas
   for (let j = 0; j < 4; j++) {
     deck.push({ id: `card-${idCounter++}`, color: CardColor.WILD, type: CardType.WILD });
     deck.push({ id: `card-${idCounter++}`, color: CardColor.WILD, type: CardType.WILD_DRAW_FOUR });

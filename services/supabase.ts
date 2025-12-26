@@ -16,12 +16,18 @@ export const syncProfile = async (profileId: string, profileData: any) => {
         id: profileId, 
         name: profileData.name,
         avatar: profileData.avatar,
+        photo_url: profileData.photoUrl || null,
         mmr: profileData.mmr,
         coins: profileData.coins,
         level: profileData.level,
         xp: profileData.xp,
         inventory: profileData.inventory,
         equipped_skin: profileData.equippedSkin,
+        equipped_table: profileData.equippedTable || 'default',
+        equipped_badge: profileData.equippedBadge || 'default',
+        equipped_effect: profileData.equippedEffect || 'none',
+        equipped_avatar_skin: profileData.equippedAvatarSkin || 'default',
+        equipped_frame: profileData.equippedFrame || 'default',
         stats: profileData.stats,
         history: profileData.history,
         achievements: profileData.achievements,
@@ -41,13 +47,19 @@ export const fetchProfile = async (profileId: string) => {
       .from('profiles')
       .select('*')
       .eq('id', profileId)
-      .maybeSingle(); // Uso do maybeSingle evita erro 406 se não houver dados
+      .maybeSingle();
     
     if (error || !data) return null;
 
     return {
       ...data,
-      equippedSkin: data.equipped_skin
+      photoUrl: data.photo_url,
+      equippedSkin: data.equipped_skin,
+      equippedTable: data.equipped_table || 'default',
+      equippedBadge: data.equipped_badge || 'default',
+      equippedEffect: data.equipped_effect || 'none',
+      equippedAvatarSkin: data.equipped_avatar_skin || 'default',
+      equippedFrame: data.equipped_frame || 'default'
     };
   } catch (e) {
     return null;
