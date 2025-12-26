@@ -28,7 +28,6 @@ const App: React.FC = () => {
   const [matchmakingError, setMatchmakingError] = useState<string | null>(null);
 
   const gameStateRef = useRef<GameState | null>(null);
-  const matchmakingTimeoutRef = useRef<any>(null);
 
   const [playerProfile, setPlayerProfile] = useState<any>(
     localDb.load('profile', {
@@ -51,7 +50,6 @@ const App: React.FC = () => {
       if (playerProfile.name || remote?.name) setCurrentView(AppView.PROFILE);
       setIsLoading(false);
 
-      // Simulação para popular lista online (no real seria via Supabase Presence)
       const simulatedOnline: Record<string, OnlinePresence> = {};
       ["EpicGamer", "UnoMaster", "CardQueen", "RyuPlayer"].forEach((name, i) => {
         simulatedOnline[`sim-${i}`] = {
@@ -63,7 +61,6 @@ const App: React.FC = () => {
     init();
   }, []);
 
-  // Sync automático do perfil
   useEffect(() => {
     if (localPlayerId && playerProfile.name) {
       localDb.save('profile', playerProfile);
@@ -71,14 +68,48 @@ const App: React.FC = () => {
     }
   }, [playerProfile, localPlayerId]);
 
-  // Fix for handleEphemeralReaction: Added missing function to manage reactions state
+  // ENGINE DE BOTS COM SINCRONIZAÇÃO DE REF
+  useEffect(() => {
+    if (gameState?.status === GameStatus.PLAYING) {
+      const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+      if (currentPlayer?.isBot) {
+        const timer = setTimeout(() => {
+          const currentState = gameStateRef.current;
+          if (!currentState || currentState.status !== GameStatus.PLAYING) return;
+
+          const playableCards = currentPlayer.hand.filter(c => isMoveValid(c, currentState, currentPlayer.hand));
+          
+          if (playableCards.length > 0) {
+            const nextIdx = getNextPlayerIndex(currentState.currentPlayerIndex, currentState.direction, currentState.players.length);
+            const nextPlayer = currentState.players[nextIdx];
+            
+            let cardToPlay = playableCards[0];
+            if (nextPlayer.hand.length <= 2) {
+              const actionCard = playableCards.find(c => c.type === CardType.WILD_DRAW_FOUR || c.type === CardType.DRAW_TWO || c.type === CardType.SKIP);
+              if (actionCard) cardToPlay = actionCard;
+            }
+
+            const chosenColor = (cardToPlay.color === CardColor.WILD || cardToPlay.type === CardType.WILD_DRAW_FOUR)
+              ? [CardColor.RED, CardColor.BLUE, CardColor.GREEN, CardColor.YELLOW][Math.floor(Math.random() * 4)] 
+              : undefined;
+            
+            const willCallUno = currentPlayer.hand.length === 2 && Math.random() > 0.2;
+            handlePlayCard(currentPlayer.id, [cardToPlay.id], chosenColor, willCallUno);
+          } else {
+            handleDrawCard(currentPlayer.id);
+          }
+        }, 1200 + Math.random() * 600);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [gameState?.currentPlayerIndex, gameState?.status, gameState?.id]);
+
   const handleEphemeralReaction = (playerId: string, reaction?: string, voicePhrase?: string) => {
     const timestamp = Date.now();
     setReactions(prev => ({
       ...prev,
       [playerId]: { playerId, reaction, voicePhrase, timestamp }
     }));
-    // Auto-remove reaction after 3 seconds to keep UI clean
     setTimeout(() => {
       setReactions(prev => {
         const current = prev[playerId];
@@ -163,21 +194,11 @@ const App: React.FC = () => {
 
       const lastPlayed = playedCards[playedCards.length - 1];
       const nextPlayerIdx = getNextPlayerIndex(prev.currentPlayerIndex, finalDir, prev.players.length);
-      const nextPlayer = prev.players[nextPlayerIdx];
-
-      if (lastPlayed.type === CardType.WILD_DRAW_FOUR) {
-        triggerHype('PLUS_4', true);
-      } else if (lastPlayed.type === CardType.DRAW_TWO) {
-        if (prev.pendingDrawCount > 0) triggerHype('STACKING');
-        else triggerHype('PLUS_2');
-      } else if (lastPlayed.type === CardType.REVERSE) {
-        triggerHype('REVERSE');
-      } else if (lastPlayed.type === CardType.SKIP) {
-        triggerHype('SKIP');
-      } else if (lastPlayed.type === CardType.WILD && chosenColor) {
-        const hasColor = nextPlayer.hand.some(c => c.color === chosenColor || c.color === CardColor.WILD);
-        if (!hasColor) triggerHype('FATAL_COLOR');
-      }
+      
+      if (lastPlayed.type === CardType.WILD_DRAW_FOUR) triggerHype('PLUS_4', true);
+      else if (lastPlayed.type === CardType.DRAW_TWO) triggerHype('PLUS_2');
+      else if (lastPlayed.type === CardType.REVERSE) triggerHype('REVERSE');
+      else if (lastPlayed.type === CardType.SKIP) triggerHype('SKIP');
 
       let nextPending = prev.pendingDrawCount + totalDraw;
       let nextIdx = nextPlayerIdx;
@@ -240,49 +261,6 @@ const App: React.FC = () => {
     });
   };
 
-  const handleCallUno = (playerId: string) => {
-    setGameState(prev => {
-      if (!prev) return prev;
-      const playerIdx = prev.players.findIndex(p => p.id === playerId);
-      const updated = [...prev.players];
-      updated[playerIdx] = { ...updated[playerIdx], hasCalledUno: true };
-      audio.play('uno_shout');
-      triggerHype('UNO_CALL');
-      const newState = { ...prev, players: updated };
-      gameStateRef.current = newState;
-      return newState;
-    });
-  };
-
-  const handleSendReaction = (playerId: string, reaction: string) => {
-    handleEphemeralReaction(playerId, reaction);
-  };
-
-  const handleSendVoice = (playerId: string, phrase: string) => {
-    handleEphemeralReaction(playerId, undefined, phrase);
-  };
-
-  const handleTimeout = (playerId: string) => {
-    handleDrawCard(playerId);
-  };
-
-  const handleStartGame = () => {
-    setGameState(prev => {
-      if (!prev) return prev;
-      const newState = { ...prev, status: GameStatus.PLAYING, turnStartTime: Date.now() };
-      gameStateRef.current = newState;
-      return newState;
-    });
-    audio.play('click');
-    audio.startMusic();
-  };
-
-  const handleLeaveRoom = () => {
-    setGameState(null);
-    setCurrentView(AppView.PROFILE);
-    audio.stopMusic();
-  };
-
   const handleCreateRoom = (settings: GameSettings, invitedPlayer?: OnlinePresence) => {
     const deck = generateDeck();
     const players: Player[] = [{
@@ -290,37 +268,28 @@ const App: React.FC = () => {
       id: localPlayerId!,
       isHost: true,
       isBot: false,
-      hand: deck.splice(0, settings.initialCardsCount),
+      hand: [],
       score: 0,
       hasCalledUno: false,
       rank: getRankFromMMR(playerProfile.mmr || 1000)
     }];
 
+    if (invitedPlayer) {
+      players.push({
+        ...invitedPlayer,
+        isBot: invitedPlayer.id.startsWith('sim-'),
+        hand: [], isHost: false, score: 0, hasCalledUno: false, mmr: 1000, level: 1, xp: 0, coins: 0, inventory: [], equippedSkin: 'default', equippedTable: 'default', equippedBadge: 'default', equippedEffect: 'none', equippedAvatarSkin: 'default', equippedFrame: 'default', stats: {wins:0,losses:0,totalGames:0,totalCardsPlayed:0,unosCalled:0,highestMMR:1000}, achievements: []
+      } as any);
+    }
+
     if (settings.mode === GameMode.NORMAL) {
-      for (let i = 0; i < settings.botCount; i++) {
+      const botsNeeded = settings.botCount - (invitedPlayer ? 1 : 0);
+      for (let i = 0; i < botsNeeded; i++) {
         players.push({
-          id: `bot-${i}`,
+          id: `bot-${i}-${Math.random()}`,
           name: `Bot ${i + 1}`,
           avatar: AVATARS[i % AVATARS.length],
-          hand: deck.splice(0, settings.initialCardsCount),
-          isHost: false,
-          isBot: true,
-          score: 0,
-          level: 1,
-          xp: 0,
-          mmr: 1000,
-          coins: 0,
-          rank: 'Bronze III',
-          inventory: [],
-          equippedSkin: 'default',
-          equippedTable: 'default',
-          equippedBadge: 'default',
-          equippedEffect: 'none',
-          equippedAvatarSkin: 'default',
-          equippedFrame: 'default',
-          stats: { wins: 0, losses: 0, totalGames: 0, totalCardsPlayed: 0, unosCalled: 0, highestMMR: 1000 },
-          achievements: [],
-          hasCalledUno: false
+          hand: [], isHost: false, isBot: true, score: 0, level: 1, xp: 0, mmr: 1000, coins: 0, rank: 'Bronze III', inventory: [], equippedSkin: 'default', equippedTable: 'default', equippedBadge: 'default', equippedEffect: 'none', equippedAvatarSkin: 'default', equippedFrame: 'default', stats: { wins: 0, losses: 0, totalGames: 0, totalCardsPlayed: 0, unosCalled: 0, highestMMR: 1000 }, achievements: [], hasCalledUno: false
         });
       }
     }
@@ -345,60 +314,61 @@ const App: React.FC = () => {
     setCurrentView(AppView.GAME);
   };
 
-  if (isLoading) return <div className="h-screen bg-black flex items-center justify-center font-brand text-yellow-400">LOADING ARENA...</div>;
+  const handleStartGame = () => {
+    setGameState(prev => {
+      if (!prev) return null;
+      const deck = [...prev.deck];
+      const updatedPlayers = prev.players.map(p => ({
+        ...p,
+        hand: deck.splice(0, prev.settings.initialCardsCount)
+      }));
+      
+      const newState = { ...prev, players: updatedPlayers, deck, status: GameStatus.PLAYING, turnStartTime: Date.now() };
+      gameStateRef.current = newState;
+      return newState;
+    });
+    audio.play('click');
+    audio.startMusic();
+  };
+
+  const handleLeaveRoom = () => {
+    setGameState(null);
+    gameStateRef.current = null;
+    setCurrentView(AppView.PROFILE);
+    audio.stopMusic();
+  };
+
+  if (isLoading) return <div className="h-screen bg-black flex items-center justify-center font-brand text-yellow-500">CONECTANDO...</div>;
 
   return (
-    <div className="h-screen w-screen bg-black text-white overflow-hidden flex flex-col">
-      {currentView === AppView.LOGIN && <Login onLogin={(name, avatar) => {
-        setPlayerProfile({ ...playerProfile, name, avatar });
-        setCurrentView(AppView.PROFILE);
-        audio.play('click');
-      }} />}
-
-      {currentView === AppView.PROFILE && <Profile 
-        profile={playerProfile} 
-        missions={[]} 
-        onNavigate={setCurrentView} 
-        onUpdateProfile={(updates: any) => setPlayerProfile((p: any) => ({ ...p, ...updates }))} 
-      />}
-
-      {currentView === AppView.LOBBY && <Lobby 
-        onBack={() => setCurrentView(AppView.PROFILE)} 
-        onCreateRoom={handleCreateRoom} 
-        onJoinRoom={() => {}} 
-        onlinePlayers={Object.values(onlinePlayers)} 
-      />}
-
+    <div className={`h-screen w-screen overflow-hidden bg-black text-white select-none ${isExploding ? 'shake-active' : ''}`}>
+      {currentView === AppView.LOGIN && <Login onLogin={(n, a) => { setPlayerProfile({...playerProfile, name: n, avatar: a}); setCurrentView(AppView.PROFILE); }} />}
+      {currentView === AppView.PROFILE && <Profile profile={{...playerProfile, rank: getRankFromMMR(playerProfile.mmr)}} onNavigate={setCurrentView} onUpdateProfile={(u) => setPlayerProfile({...playerProfile, ...u})} missions={[]} />}
+      {currentView === AppView.LOBBY && <Lobby onBack={() => setCurrentView(AppView.PROFILE)} onCreateRoom={handleCreateRoom} onJoinRoom={() => {}} onlinePlayers={Object.values(onlinePlayers)} />}
       {currentView === AppView.GAME && gameState && (
         <GameTable 
-          gameState={gameState}
-          localPlayerId={localPlayerId!}
-          equippedSkin={playerProfile.equippedSkin}
-          reactions={reactions}
-          onPlayCard={handlePlayCard}
-          onDrawCard={handleDrawCard}
-          onCallUno={handleCallUno}
-          onSendReaction={handleSendReaction}
-          onTimeout={handleTimeout}
-          onSendVoice={handleSendVoice}
-          onStartGame={handleStartGame}
+          gameState={gameState} localPlayerId={localPlayerId!} reactions={reactions} equippedSkin={playerProfile.equippedSkin}
+          onPlayCard={handlePlayCard} onDrawCard={handleDrawCard} onTimeout={handleDrawCard} onStartGame={handleStartGame}
+          onCallUno={(pid) => handleEphemeralReaction(pid, undefined, "UNO!")}
+          onSendReaction={(pid, r) => handleEphemeralReaction(pid, r)} 
+          onSendVoice={(pid, v) => handleEphemeralReaction(pid, undefined, v)}
           onLeaveRoom={handleLeaveRoom}
           onlinePlayers={Object.values(onlinePlayers)}
         />
       )}
-
       {currentView === AppView.RANKING && <Ranking onBack={() => setCurrentView(AppView.PROFILE)} currentMMR={playerProfile.mmr} />}
-      {currentView === AppView.STORE && <Store profile={playerProfile} onUpdate={(u: any) => setPlayerProfile((p: any) => ({ ...p, ...u }))} onClose={() => setCurrentView(AppView.PROFILE)} />}
+      {currentView === AppView.STORE && <Store profile={playerProfile} onUpdate={(u) => setPlayerProfile({...playerProfile, ...u})} onClose={() => setCurrentView(AppView.PROFILE)} />}
+      {currentView === AppView.INTEL && <IntelHub onBack={() => setCurrentView(AppView.PROFILE)} />}
       
-      {gameState?.status === GameStatus.FINISHED && gameState.winner && (
-        <GameOver winner={gameState.winner} mode={gameState.settings.mode} onRestart={handleLeaveRoom} />
-      )}
+      {gameState?.status === GameStatus.FINISHED && <GameOver winner={gameState.winner!} mode={gameState.settings.mode} onRestart={handleLeaveRoom} />}
 
       {hypeText && (
-        <div className={`fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[1000] pointer-events-none transition-all duration-500 ${isExploding ? 'scale-150' : 'scale-100'}`}>
-          <div className="bg-yellow-500 text-black px-12 py-6 rounded-full font-brand text-4xl italic shadow-[0_0_100px_rgba(234,179,8,0.8)] border-4 border-white animate-bounce text-center max-w-lg">
-            {hypeText}
-          </div>
+        <div className="fixed inset-0 z-[5000] flex items-center justify-center pointer-events-none p-4">
+           <div className={`animate-scale-in text-center ${isExploding ? 'scale-150' : 'scale-110'}`}>
+              <h2 className="text-5xl lg:text-9xl font-brand italic text-transparent bg-clip-text bg-gradient-to-b from-yellow-200 via-yellow-400 to-orange-600 drop-shadow-[0_0_30px_rgba(234,179,8,1)] uppercase leading-none -rotate-2">
+                {hypeText}
+              </h2>
+           </div>
         </div>
       )}
     </div>
