@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🃏</text></svg>">
-  <title>UNO Arena Mobile</title>
+  <title>UNO Arena Mobile & Web</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=Quicksand:wght@400;700&display=swap" rel="stylesheet">
   <style>
@@ -19,7 +19,7 @@
       padding: 0; 
       overflow: hidden; 
       background: #000;
-      touch-action: none; 
+      touch-action: pan-x pan-y; 
       -webkit-user-select: none;
       user-select: none;
       width: 100vw;
@@ -65,11 +65,11 @@
       top: 50%;
       left: 50%;
       transform: translate(-50%, -50%);
-      width: 80vh;
-      height: 80vh;
+      width: min(85vh, 85vw);
+      height: min(85vh, 85vw);
       background: radial-gradient(circle, #ff6a00 0%, #3a0000 70%, transparent 100%);
       border-radius: 50%;
-      box-shadow: 0 0 80px rgba(255, 106, 0, 0.15);
+      box-shadow: 0 0 100px rgba(255, 106, 0, 0.2);
       z-index: 1;
     }
 
@@ -86,7 +86,7 @@
 
     .player-node {
       position: absolute;
-      transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+      transition: all 0.6s cubic-bezier(0.23, 1, 0.32, 1);
     }
 
     @keyframes scale-in {
@@ -103,8 +103,8 @@
       position: fixed;
       top: 50%;
       left: 50%;
-      width: 500px;
-      height: 500px;
+      width: 600px;
+      height: 600px;
       border: 20px solid #ea6208;
       border-radius: 50%;
       pointer-events: none;
@@ -120,20 +120,9 @@
       30% { transform: translate(-5px, 10px); }
       40% { transform: translate(5px, -5px); }
       50% { transform: translate(-10px, 5px); }
-      60% { transform: translate(10px, -10px); }
-      70% { transform: translate(-5px, 5px); }
-      80% { transform: translate(5px, 10px); }
-      90% { transform: translate(-10px, -5px); }
       100% { transform: translate(0, 0); }
     }
     .shake-active { animation: screenshake 0.4s ease-in-out infinite; }
-
-    @keyframes flash-impact {
-      0% { filter: brightness(1) saturate(1); }
-      20% { filter: brightness(2) saturate(3); }
-      100% { filter: brightness(1) saturate(1); }
-    }
-    .flash-active { animation: flash-impact 0.6s ease-out forwards; }
 
     .safe-area-inset {
       padding-top: env(safe-area-inset-top);
@@ -141,12 +130,6 @@
       padding-left: env(safe-area-inset-left);
       padding-right: env(safe-area-inset-right);
     }
-
-    @keyframes slide-up {
-      from { transform: translateY(20px); opacity: 0; }
-      to { transform: translateY(0); opacity: 1; }
-    }
-    .animate-slide-up { animation: slide-up 0.3s ease-out forwards; }
   </style>
   <script type="importmap">
 {

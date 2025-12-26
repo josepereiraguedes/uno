@@ -65,3 +65,19 @@ export const fetchProfile = async (profileId: string) => {
     return null;
   }
 };
+
+export const fetchRanking = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('name, avatar, photo_url, mmr')
+      .order('mmr', { ascending: false })
+      .limit(50);
+    
+    if (error) throw error;
+    return data;
+  } catch (e) {
+    console.error("Erro ao buscar ranking:", e);
+    return [];
+  }
+};

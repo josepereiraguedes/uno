@@ -25,6 +25,7 @@ const App: React.FC = () => {
   const [isMatchmaking, setIsMatchmaking] = useState(false);
   const [hypeText, setHypeText] = useState<string | null>(null);
   const [isExploding, setIsExploding] = useState(false);
+  const [matchmakingError, setMatchmakingError] = useState<string | null>(null);
 
   const gameStateRef = useRef<GameState | null>(null);
   const matchmakingTimeoutRef = useRef<any>(null);
@@ -50,6 +51,7 @@ const App: React.FC = () => {
       if (playerProfile.name) setCurrentView(AppView.PROFILE);
       setIsLoading(false);
 
+      // Simulação para popular lista online (no real seria via Supabase Presence)
       const simulatedOnline: Record<string, OnlinePresence> = {};
       ["EpicGamer", "UnoMaster", "CardQueen", "RyuPlayer"].forEach((name, i) => {
         simulatedOnline[`sim-${i}`] = {
@@ -61,6 +63,7 @@ const App: React.FC = () => {
     init();
   }, []);
 
+  // Sync automático do perfil
   useEffect(() => {
     if (localPlayerId && playerProfile.name) {
       localDb.save('profile', playerProfile);
@@ -79,8 +82,29 @@ const App: React.FC = () => {
       setIsExploding(true);
       setTimeout(() => setIsExploding(false), 800);
     }
-    
     setTimeout(() => setHypeText(null), 3000);
+  };
+
+  const updateProfilePostGame = (winnerId: string, isRanked: boolean) => {
+    const isWinner = localPlayerId === winnerId;
+    const mmrChange = isRanked ? (isWinner ? 25 : -15) : 0;
+    const coinsChange = isWinner ? 50 : 10;
+
+    setPlayerProfile((prev: any) => {
+      const newMMR = Math.max(0, (prev.mmr || 1000) + mmrChange);
+      const newCoins = (prev.coins || 0) + coinsChange;
+      const newStats = {
+        ...prev.stats,
+        wins: isWinner ? (prev.stats.wins + 1) : prev.stats.wins,
+        losses: !isWinner ? (prev.stats.losses + 1) : prev.stats.losses,
+        totalGames: (prev.stats.totalGames || 0) + 1,
+        highestMMR: Math.max(prev.stats.highestMMR || 0, newMMR)
+      };
+
+      const updated = { ...prev, mmr: newMMR, coins: newCoins, stats: newStats };
+      if (localPlayerId) syncProfile(localPlayerId, updated);
+      return updated;
+    });
   };
 
   const handlePlayCard = (playerId: string, cardIds: string[], chosenColor?: CardColor, didCallUno?: boolean) => {
@@ -117,11 +141,9 @@ const App: React.FC = () => {
       });
 
       const lastPlayed = playedCards[playedCards.length - 1];
-      
       const nextPlayerIdx = getNextPlayerIndex(prev.currentPlayerIndex, finalDir, prev.players.length);
       const nextPlayer = prev.players[nextPlayerIdx];
 
-      // Detecção de +4 para explosão visual
       if (lastPlayed.type === CardType.WILD_DRAW_FOUR) {
         triggerHype('PLUS_4', true);
       } else if (lastPlayed.type === CardType.DRAW_TWO) {
@@ -161,6 +183,7 @@ const App: React.FC = () => {
         audio.play('win_fanfare');
         triggerHype('WIN');
         audio.stopMusic();
+        updateProfilePostGame(updatedPlayers[playerIndex].id, prev.settings.mode === GameMode.RANKED);
       } else {
         audio.play('card_play');
       }
@@ -207,18 +230,24 @@ const App: React.FC = () => {
     }, 4000);
   };
 
-  const cancelMatchmaking = () => {
-    if (matchmakingTimeoutRef.current) clearTimeout(matchmakingTimeoutRef.current);
-    setIsMatchmaking(false);
-    audio.play('click');
-  };
-
   const createRoom = async (settings: GameSettings, invitedPlayer?: OnlinePresence) => {
-    if (settings.mode === GameMode.RANKED && !invitedPlayer) {
+    setMatchmakingError(null);
+    if (settings.mode === GameMode.RANKED) {
       setIsMatchmaking(true);
+      
+      // Validação rigorosa: Ranked exige pelo menos 2 humanos
+      // No simulador, filtramos quem não é 'sim-'
+      const realHumans = (Object.values(onlinePlayers) as OnlinePresence[]).filter(p => !p.id.startsWith('sim-') && p.id !== localPlayerId);
+      const humanOpponent = invitedPlayer || realHumans[0];
+      
       matchmakingTimeoutRef.current = setTimeout(() => {
-        finalizeRoomCreation(settings);
-      }, 2500);
+        if (!humanOpponent) {
+          setMatchmakingError("A ARENA RANKED ESTÁ VAZIA. É NECESSÁRIO PELO MENOS OUTRO JOGADOR HUMANO ONLINE.");
+          setIsMatchmaking(false);
+          return;
+        }
+        finalizeRoomCreation(settings, humanOpponent);
+      }, 3000);
     } else {
       finalizeRoomCreation(settings, invitedPlayer);
     }
@@ -231,14 +260,15 @@ const App: React.FC = () => {
     
     if (invitedPlayer) {
       players.push({ 
-        ...invitedPlayer, hand: [], isHost: false, isBot: true, score: 0, level: 1, xp: 0, mmr: 1000, coins: 0, inventory: [], equippedSkin: 'default', equippedTable: 'default', equippedBadge: 'default', equippedEffect: 'none', equippedAvatarSkin: 'default', equippedFrame: 'default', stats: {wins:0,losses:0,totalGames:0,totalCardsPlayed:0,unosCalled:0,highestMMR:1000}, achievements: [], hasCalledUno: false 
+        ...invitedPlayer, hand: [], isHost: false, isBot: invitedPlayer.id.startsWith('sim-'), score: 0, level: 1, xp: 0, mmr: 1000, coins: 0, inventory: [], equippedSkin: 'default', equippedTable: 'default', equippedBadge: 'default', equippedEffect: 'none', equippedAvatarSkin: 'default', equippedFrame: 'default', stats: {wins:0,losses:0,totalGames:0,totalCardsPlayed:0,unosCalled:0,highestMMR:1000}, achievements: [], hasCalledUno: false 
       } as any);
     }
 
-    const count = settings.mode === GameMode.RANKED ? (invitedPlayer ? 2 : 3) : settings.botCount;
-    for (let i = 0; i < count; i++) {
+    const countToAdd = settings.mode === GameMode.RANKED ? 0 : (settings.botCount - (invitedPlayer ? 1 : 0));
+    
+    for (let i = 0; i < Math.max(0, countToAdd); i++) {
       players.push({ 
-        id: `opponent-${i}-${Math.random()}`, name: settings.mode === GameMode.RANKED ? `Pro_${Math.floor(Math.random()*999)}` : `Bot ${i+1}`, avatar: AVATARS[Math.floor(Math.random() * AVATARS.length)], hand: [], isHost: false, isBot: true, score: 0, level: 1, xp: 0, mmr: 1000, coins: 0, rank: 'Bronze III', inventory: [], equippedSkin: 'default', equippedTable: 'default', equippedBadge: 'default', equippedEffect: 'none', equippedAvatarSkin: 'default', equippedFrame: 'default', stats: {wins:0,losses:0,totalGames:0,totalCardsPlayed:0,unosCalled:0,highestMMR:1000}, achievements: [], hasCalledUno: false 
+        id: `opponent-${i}-${Math.random()}`, name: `Bot ${i+1}`, avatar: AVATARS[Math.floor(Math.random() * AVATARS.length)], hand: [], isHost: false, isBot: true, score: 0, level: 1, xp: 0, mmr: 1000, coins: 0, rank: 'Bronze III', inventory: [], equippedSkin: 'default', equippedTable: 'default', equippedBadge: 'default', equippedEffect: 'none', equippedAvatarSkin: 'default', equippedFrame: 'default', stats: {wins:0,losses:0,totalGames:0,totalCardsPlayed:0,unosCalled:0,highestMMR:1000}, achievements: [], hasCalledUno: false 
       });
     }
 
@@ -295,14 +325,24 @@ const App: React.FC = () => {
 
   if (isMatchmaking) return (
     <div className="h-screen w-screen bg-black flex flex-col items-center justify-center font-brand p-6">
-      <div className="relative w-40 h-40 mb-10">
-        <div className="absolute inset-0 border-4 border-yellow-500/20 rounded-full"></div>
-        <div className="absolute inset-0 border-t-4 border-yellow-500 rounded-full animate-spin"></div>
-        <div className="absolute inset-0 flex items-center justify-center text-4xl animate-pulse">⚔️</div>
-      </div>
-      <h2 className="text-3xl text-yellow-500 italic mb-2">BUSCANDO OPONENTES</h2>
-      <p className="text-white/40 text-[10px] uppercase tracking-[0.3em] mb-12">Filtrando por MMR: {playerProfile.mmr}</p>
-      <button onClick={cancelMatchmaking} className="px-10 py-4 bg-white/5 border border-white/10 rounded-2xl text-white/60 font-brand text-sm hover:bg-red-600/20 hover:text-red-500 transition-all active:scale-95">CANCELAR BUSCA</button>
+      {!matchmakingError ? (
+        <>
+          <div className="relative w-44 h-44 mb-10">
+            <div className="absolute inset-0 border-4 border-yellow-500/20 rounded-full"></div>
+            <div className="absolute inset-0 border-t-4 border-yellow-500 rounded-full animate-spin"></div>
+            <div className="absolute inset-0 flex items-center justify-center text-5xl animate-pulse">⚔️</div>
+          </div>
+          <h2 className="text-3xl text-yellow-500 italic mb-2 uppercase">Escaneando Arena</h2>
+          <p className="text-white/40 text-[10px] uppercase tracking-[0.3em] mb-12">Buscando oponentes humanos reais...</p>
+        </>
+      ) : (
+        <div className="text-center animate-scale-in">
+           <div className="text-7xl mb-6">🚫</div>
+           <h2 className="text-2xl text-red-500 font-brand italic mb-4 uppercase">Matchmaking Falhou</h2>
+           <p className="text-white/60 text-xs uppercase leading-loose mb-10 px-6 max-w-sm mx-auto">{matchmakingError}</p>
+        </div>
+      )}
+      <button onClick={() => { setIsMatchmaking(false); setMatchmakingError(null); }} className="px-12 py-5 bg-white/5 border border-white/10 rounded-2xl text-white/60 font-brand text-sm hover:bg-red-600/20 hover:text-red-500 transition-all active:scale-95">RETORNAR</button>
     </div>
   );
 
@@ -312,7 +352,7 @@ const App: React.FC = () => {
       {hypeText && (
         <div className="fixed inset-0 z-[5000] flex items-center justify-center pointer-events-none p-4 overflow-hidden">
            <div className={`animate-scale-in text-center transform ${isExploding ? 'scale-150' : 'scale-125'}`}>
-              <h2 className="text-5xl lg:text-9xl font-brand italic text-transparent bg-clip-text bg-gradient-to-b from-yellow-200 via-yellow-400 to-orange-600 drop-shadow-[0_0_40px_rgba(234,179,8,1)] uppercase tracking-tighter leading-none -rotate-3 animate-pulse">
+              <h2 className="text-6xl lg:text-[10rem] font-brand italic text-transparent bg-clip-text bg-gradient-to-b from-yellow-200 via-yellow-400 to-orange-600 drop-shadow-[0_0_60px_rgba(234,179,8,1)] uppercase tracking-tighter leading-none -rotate-2 animate-pulse">
                 {hypeText}
               </h2>
            </div>
@@ -329,7 +369,7 @@ const App: React.FC = () => {
           gameState={gameState} localPlayerId={localPlayerId!} reactions={reactions} equippedSkin={playerProfile.equippedSkin}
           onPlayCard={handlePlayCard} onDrawCard={handleDrawCard} onTimeout={handleDrawCard} onStartGame={startGame}
           onCallUno={(pid) => handleEphemeralReaction(pid, undefined, "UNO!")}
-          onSendReaction={handleEphemeralReaction} onSendVoice={(pid, v) => handleEphemeralReaction(pid, undefined, v)}
+          onSendReaction={handleEphemeralReaction} onSendReactionInternal={handleEphemeralReaction} onSendVoice={(pid, v) => handleEphemeralReaction(pid, undefined, v)}
           onLeaveRoom={() => { setGameState(null); setCurrentView(AppView.PROFILE); audio.stopMusic(); }}
           onlinePlayers={Object.values(onlinePlayers)}
         />
